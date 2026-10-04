@@ -1,0 +1,19 @@
+# Environment & secrets
+.env
+.env.local
+*.secret.json
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor & IDE artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build / node artifacts
+node_modules/
+dist/
