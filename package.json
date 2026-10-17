@@ -1,0 +1,17 @@
+{
+  "name": "splittab",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Zero-install restaurant bill splitting for India (Cloudflare Workers + D1 + Gemini)",
+  "scripts": {
+    "db:local": "wrangler d1 migrations apply splittab --local",
+    "db:remote": "wrangler d1 migrations apply splittab --remote",
+    "dev": "wrangler dev",
+    "dev:mock": "wrangler dev --var GEMINI_MOCK:1",
+    "test": "node tests/math.test.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.151.1"
+  }
+}

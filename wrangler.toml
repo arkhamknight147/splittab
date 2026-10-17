@@ -1,0 +1,30 @@
+# SplitTab v2 — Cloudflare Workers (static assets + API) + D1
+name = "splittab"
+main = "src/worker.js"
+compatibility_date = "2026-09-01"
+
+# Static frontend (public/index.html). Unknown paths such as /r/<roomId>
+# fall back to index.html; /api/* always reaches the Worker first.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "splittab"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"   # printed by: npx wrangler d1 create splittab
+migrations_dir = "migrations"
+
+[vars]
+GEMINI_MODEL = "gemini-3.6-flash"            # primary vision model
+GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"  # used if primary is retired / rate-limited
+ROOM_TTL_DAYS = "30"                         # rooms auto-deleted after this many days
+GEMINI_MOCK = "0"                            # "1" = return the Bangalore Bistro fixture (no API key needed)
+
+# Daily clean-up of expired rooms (03:00 UTC)
+[triggers]
+crons = ["0 3 * * *"]
+
+# Secret (never in this file):  npx wrangler secret put GEMINI_API_KEY

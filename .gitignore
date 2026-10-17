@@ -1,19 +1,5 @@
-# Environment & secrets
-.env
-.env.local
-*.secret.json
-
-# Operating System Files
+node_modules/
+.wrangler/
+.dev.vars
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Editor & IDE artifacts
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Build / node artifacts
-node_modules/
-dist/

@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="Fair itemized bill splits for Indian restaurants. Zero app installs, 1-tap UPI.">
+  <title>SplitTab - Zero-Install Dining Split</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .spinner { border-top-color: transparent; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 flex justify-center p-3 sm:p-6">
+  <div class="w-full max-w-md bg-white shadow-xl rounded-2xl p-5 border border-slate-200 self-start">
+
+    <!-- HEADER -->
+    <div class="flex items-center justify-between border-b pb-4 mb-5">
+      <a href="/" class="block">
+        <h1 class="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-1.5">SplitTab <span class="text-xl">🧾</span></h1>
+        <p class="text-xs text-slate-500 font-medium">Fair itemized splits • Zero app installs</p>
+      </a>
+      <div id="roomBadge" class="hidden text-right">
+        <div class="text-xs font-semibold px-2.5 py-1 bg-sky-100 text-sky-800 rounded-full">Room <span id="badgeRoomId"></span></div>
+        <button id="btnRefresh" class="mt-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- ===================================================== -->
+    <!-- VIEW 1: HOST SETUP                                     -->
+    <!-- ===================================================== -->
+    <section id="viewSetup" class="hidden">
+      <form id="setupForm" class="space-y-4" novalidate>
+        <div>
+          <label for="hostName" class="block text-xs font-bold uppercase text-slate-600 mb-1">Your Name (Host)</label>
+          <input type="text" id="hostName" maxlength="40" placeholder="e.g. Nishant" autocomplete="given-name"
+                 class="w-full px-3 py-2.5 text-sm border rounded-xl focus:ring-2 focus:ring-sky-500 outline-none border-slate-300">
+        </div>
+        <div>
+          <label for="hostVpa" class="block text-xs font-bold uppercase text-slate-600 mb-1">Your UPI ID (VPA)</label>
+          <input type="text" id="hostVpa" placeholder="e.g. yourname@okhdfcbank" autocapitalize="off" autocomplete="off" spellcheck="false"
+                 class="w-full px-3 py-2.5 text-sm border rounded-xl focus:ring-2 focus:ring-sky-500 outline-none border-slate-300">
+          <p class="text-[11px] text-slate-400 mt-1">Friends' 1-tap payments go straight to this UPI ID.</p>
+        </div>
+        <div>
+          <label for="participantsInput" class="block text-xs font-bold uppercase text-slate-600 mb-1">Friends at Dinner</label>
+          <input type="text" id="participantsInput" placeholder="Rohan, Priya, Amit"
+                 class="w-full px-3 py-2.5 text-sm border rounded-xl focus:ring-2 focus:ring-sky-500 outline-none border-slate-300">
+          <p class="text-[11px] text-slate-400 mt-1">Comma-separated first names. You're added automatically.</p>
+        </div>
+        <div>
+          <label for="actualPaidInput" class="block text-xs font-bold uppercase text-slate-600 mb-1">Actual Amount You Paid (Optional)</label>
+          <input type="number" id="actualPaidInput" inputmode="decimal" min="0" step="0.01" placeholder="Leave blank if no Zomato / card discount"
+                 class="w-full px-3 py-2.5 text-sm border rounded-xl focus:ring-2 focus:ring-sky-500 outline-none border-slate-300">
+          <p class="text-[11px] text-slate-400 mt-1">Paid less via Zomato Gold / bank offer? Everyone shares the discount.</p>
+        </div>
+        <div>
+          <span class="block text-xs font-bold uppercase text-slate-600 mb-1">Restaurant Receipt Photo</span>
+          <label class="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl p-4 cursor-pointer hover:bg-slate-50 transition">
+            <span class="text-2xl mb-1">📸</span>
+            <span id="fileNameDisplay" class="text-xs font-semibold text-sky-600 text-center">Tap to snap or select bill photo</span>
+            <input type="file" id="billFileInput" accept="image/*" class="hidden">
+          </label>
+        </div>
+        <button type="submit" id="btnScan"
+                class="w-full py-3.5 bg-slate-900 text-white font-bold rounded-xl shadow-lg hover:bg-slate-800 transition">
+          ⚡ Scan Bill
+        </button>
+        <button type="button" id="btnManual" class="w-full text-xs font-semibold text-slate-500 hover:text-slate-800">
+          No photo? Enter the bill manually →
+        </button>
+      </form>
+
+      <div id="scanLoading" class="hidden text-center py-8">
+        <div class="inline-block animate-spin w-8 h-8 border-4 border-sky-600 rounded-full spinner mb-3"></div>
+        <p class="text-sm font-semibold text-slate-700">AI is reading items, GST &amp; VAT…</p>
+        <p class="text-xs text-slate-400">Usually takes 3–8 seconds</p>
+      </div>
+    </section>
+
+    <!-- ===================================================== -->
+    <!-- VIEW 2: HOST REVIEW & EDIT (before the room exists)    -->
+    <!-- ===================================================== -->
+    <section id="viewReview" class="hidden space-y-4">
+      <div>
+        <h2 class="text-lg font-extrabold text-slate-900">Check the bill</h2>
+        <p class="text-xs text-slate-500">Fix anything the AI misread. Tap 🍺 to mark a drink as alcohol (taxed with liquor VAT, not GST).</p>
+      </div>
+
+      <div>
+        <label for="merchantName" class="block text-xs font-bold uppercase text-slate-600 mb-1">Restaurant</label>
+        <input type="text" id="merchantName" maxlength="80" placeholder="Restaurant name"
+               class="w-full px-3 py-2 text-sm border rounded-xl outline-none focus:ring-2 focus:ring-sky-500 border-slate-300">
+      </div>
+
+      <div>
+        <div class="flex justify-between items-end mb-1.5">
+          <span class="text-xs font-bold uppercase text-slate-600">Items</span>
+          <span class="text-[11px] text-slate-400">Line total ₹ · Alcohol</span>
+        </div>
+        <div id="reviewItems" class="space-y-2"></div>
+        <button type="button" id="btnAddItem" class="mt-2 w-full py-2 border border-dashed border-slate-300 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-50">+ Add item</button>
+      </div>
+
+      <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+        <span class="block text-xs font-bold uppercase text-slate-600">Taxes &amp; charges on the bill (₹)</span>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <label class="space-y-1"><span class="text-slate-500">CGST</span><input data-charge="cgst_paise" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
+          <label class="space-y-1"><span class="text-slate-500">SGST</span><input data-charge="sgst_paise" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
+          <label class="space-y-1"><span class="text-slate-500">Liquor VAT</span><input data-charge="liquor_vat_paise" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
+          <label class="space-y-1"><span class="text-slate-500">Service charge</span><input data-charge="service_charge_paise" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
+          <label class="space-y-1 col-span-2"><span class="text-slate-500">Grand total printed on bill</span><input data-charge="grand_total_paise" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300 font-semibold"></label>
+          <label class="space-y-1 col-span-2"><span class="text-slate-500">Amount you actually paid (blank = grand total)</span><input id="reviewActualPaid" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
+        </div>
+      </div>
+
+      <div id="reviewCheck" class="text-xs rounded-xl p-3 border"></div>
+
+      <button type="button" id="btnCreateRoom" class="w-full py-3.5 bg-slate-900 text-white font-bold rounded-xl shadow-lg hover:bg-slate-800 transition">
+        ✅ Create Room &amp; Share
+      </button>
+      <button type="button" id="btnBackToSetup" class="w-full text-xs font-semibold text-slate-500 hover:text-slate-800">← Back</button>
+    </section>
+
+    <!-- ===================================================== -->
+    <!-- VIEW 3: ROOM (diners + host)                           -->
+    <!-- ===================================================== -->
+    <section id="viewRoom" class="hidden space-y-5">
+      <div class="flex border-b border-slate-200">
+        <button id="tabClaim" data-tab="claim" class="flex-1 pb-2 text-sm font-bold text-sky-600 border-b-2 border-sky-600">Claim Items</button>
+        <button id="tabSummary" data-tab="summary" class="flex-1 pb-2 text-sm font-semibold text-slate-400 hover:text-slate-600">Room Summary</button>
+      </div>
+
+      <!-- TAB: CLAIM -->
+      <div id="contentClaim" class="space-y-4">
+        <div class="bg-sky-50 border border-sky-200 rounded-xl p-3.5">
+          <label for="userSelector" class="block text-xs font-bold uppercase text-sky-900 mb-1.5">Who are you?</label>
+          <select id="userSelector" class="w-full bg-white px-3 py-2 text-sm font-semibold border rounded-lg border-sky-300 outline-none"></select>
+        </div>
+
+        <div id="claimArea" class="space-y-4">
+          <div>
+            <div class="flex justify-between items-center mb-2">
+              <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">Tap dishes you ate / shared</h2>
+              <span class="text-[11px] text-slate-400">Shared = split equally</span>
+            </div>
+            <div id="menuContainer" class="space-y-2"></div>
+          </div>
+
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1.5 text-xs text-slate-600">
+            <div class="flex justify-between"><span>Your items:</span><span id="userBaseTotal" class="font-semibold text-slate-800">₹0.00</span></div>
+            <div class="flex justify-between"><span>Your share of GST / VAT / service:</span><span id="userTaxTotal" class="font-semibold text-slate-800">₹0.00</span></div>
+            <div id="adjustRow" class="hidden flex justify-between text-emerald-700 font-medium"><span id="adjustLabel">Discount savings:</span><span id="userAdjust">₹0.00</span></div>
+            <div class="border-t border-slate-200 pt-2 flex justify-between text-base font-extrabold text-slate-900">
+              <span>Your total:</span><span id="userGrandTotal" class="text-sky-700">₹0.00</span>
+            </div>
+          </div>
+
+          <!-- Payment (non-host) -->
+          <div id="payBlock" class="space-y-2">
+            <a id="btnUpi" href="#" class="w-full py-3.5 bg-emerald-600 text-white font-bold rounded-xl shadow-lg hover:bg-emerald-500 transition flex items-center justify-center gap-2 text-center">
+              📱 Pay <span id="btnPayAmount">₹0.00</span> via UPI
+            </a>
+            <div id="iosApps" class="hidden grid grid-cols-3 gap-2">
+              <a data-app="gpay" class="py-2 text-center text-xs font-semibold bg-white border border-slate-300 rounded-lg">GPay</a>
+              <a data-app="phonepe" class="py-2 text-center text-xs font-semibold bg-white border border-slate-300 rounded-lg">PhonePe</a>
+              <a data-app="paytm" class="py-2 text-center text-xs font-semibold bg-white border border-slate-300 rounded-lg">Paytm</a>
+            </div>
+            <button id="btnCopyUpi" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition">📋 Copy UPI ID &amp; amount</button>
+            <button id="btnSelfPaid" class="w-full py-2 border border-slate-300 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg transition">✅ I have paid the host</button>
+          </div>
+          <div id="hostBlock" class="hidden text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3">
+            You're the host: friends pay you. Claim what you ate here too, then track payments in <b>Room Summary</b>.
+          </div>
+        </div>
+        <p id="pickNameHint" class="text-xs text-slate-500 text-center py-4">Pick your name to start claiming.</p>
+      </div>
+
+      <!-- TAB: SUMMARY -->
+      <div id="contentSummary" class="hidden space-y-4">
+        <div id="hostShareBanner" class="hidden bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl p-3 text-xs">
+          Room created 🎉 Share the link with your friends so they can claim their dishes.
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3 border border-slate-200 text-xs text-slate-600 space-y-1">
+          <div class="flex justify-between"><span>Restaurant:</span><span id="sumMerchant" class="font-bold text-slate-800"></span></div>
+          <div class="flex justify-between"><span>Printed bill total:</span><span id="sumBillTotal" class="font-bold">₹0</span></div>
+          <div class="flex justify-between"><span>Host paid:</span><span id="sumHostPaid" class="font-bold">₹0</span></div>
+          <div class="flex justify-between"><span>Host UPI:</span><span id="sumHostVpa" class="font-mono text-slate-800"></span></div>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-bold uppercase text-slate-500 mb-2">Who owes what</h3>
+          <div id="participantStatusList" class="space-y-2"></div>
+        </div>
+
+        <div id="unclaimedBox" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-1">
+          <div class="flex justify-between font-bold"><span>Unclaimed (host is carrying this)</span><span id="unclaimedTotal"></span></div>
+          <div id="unclaimedList" class="text-amber-800"></div>
+        </div>
+
+        <div id="reconLine" class="text-[11px] text-slate-500 text-center"></div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btnShareWa" class="py-2.5 bg-emerald-500 text-white text-xs font-bold rounded-xl hover:bg-emerald-600 transition">💬 Share on WhatsApp</button>
+          <button id="btnCopyLink" class="py-2.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition">🔗 Copy room link</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="viewError" class="hidden text-center py-10 space-y-3">
+      <p class="text-3xl">🤷</p>
+      <p id="errorText" class="text-sm font-semibold text-slate-700"></p>
+      <a href="/" class="inline-block text-xs font-bold text-sky-700">Start a new split →</a>
+    </section>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-lg max-w-[90vw] text-center"></div>
+
+  <script>
+  'use strict';
+
+  // =====================================================================
+  // CONFIG — no secrets live here. The API is same-origin (Cloudflare Worker).
+  // =====================================================================
+  const API = '/api';
+  const LS = { hostName: 'st.hostName', hostVpa: 'st.hostVpa', hostRooms: 'st.hostRooms', me: (r) => `st.me.${r}` };
+
+  // =====================================================================
+  // <math> — Split engine (pure; tested by tests/math.test.mjs)
+  // All inputs/outputs in paise. See Architecture doc §4 for the formulas.
+  // =====================================================================
+  function computeSplit(session, participants, items, claims) {
+    const claimMap = {};
+    for (const c of claims) (claimMap[c.line_item_id] = claimMap[c.line_item_id] || []).push(c.participant_id);
+
+    let bFood = 0, bLiq = 0;
+    for (const i of items) { if (i.is_alcohol) bLiq += i.total_price_paise; else bFood += i.total_price_paise; }
+    const bTotal = bFood + bLiq;
+
+    const sc = session.service_charge_paise || 0;
+    const gst = (session.cgst_paise || 0) + (session.sgst_paise || 0);
+    const vat = session.liquor_vat_paise || 0;
+    const scFood = bTotal > 0 ? sc * bFood / bTotal : 0;
+    const scLiq = bTotal > 0 ? sc * bLiq / bTotal : 0;
+
+    // Overheads stay in their own bucket. If a bucket has no items (e.g. VAT printed
+    // but no item flagged as alcohol) its overhead moves to the other bucket so no rupee is lost.
+    let overFood = gst + scFood, overLiq = vat + scLiq;
+    if (bFood === 0) { overLiq += overFood; overFood = 0; }
+    if (bLiq === 0) { overFood += overLiq; overLiq = 0; }
+    const mFood = bFood > 0 ? 1 + overFood / bFood : 1;
+    const mLiq = bLiq > 0 ? 1 + overLiq / bLiq : 1;
+
+    // Computed bill = items + taxes + service charge. Scale it to what the host actually paid
+    // (or the printed total), which also absorbs round-off and printed discounts.
+    const computedTotal = bFood * mFood + bLiq * mLiq;
+    const printedTotal = session.grand_total_paise || 0;
+    const targetTotal = session.actual_paid_paise > 0 ? session.actual_paid_paise
+      : printedTotal > 0 ? printedTotal : Math.round(computedTotal);
+    const delta = computedTotal > 0 ? targetTotal / computedTotal : 1;
+
+    const people = {};
+    for (const p of participants) people[p.id] = { baseFood: 0, baseLiq: 0 };
+    const unclaimed = { items: [], base: 0, raw: 0 };
+
+    for (const i of items) {
+      const who = (claimMap[i.id] || []).filter((pid) => people[pid]);
+      const m = i.is_alcohol ? mLiq : mFood;
+      if (who.length === 0) {
+        unclaimed.items.push(i);
+        unclaimed.base += i.total_price_paise;
+        unclaimed.raw += i.total_price_paise * m;
+        continue;
+      }
+      const share = i.total_price_paise / who.length;
+      for (const pid of who) { if (i.is_alcohol) people[pid].baseLiq += share; else people[pid].baseFood += share; }
+    }
+
+    // Round to whole paise. Every non-host is rounded normally; the host absorbs the
+    // ±1–2 paise residual so shares + unclaimed always equal targetTotal exactly.
+    const host = participants.find((p) => p.is_host) || participants[0];
+    let assigned = 0;
+    for (const p of participants) {
+      const r = people[p.id];
+      r.base = r.baseFood + r.baseLiq;
+      r.raw = r.baseFood * mFood + r.baseLiq * mLiq;
+      r.exact = r.raw * delta;
+      r.overhead = r.raw - r.base;
+      r.adjustment = r.exact - r.raw;
+      if (!host || p.id !== host.id) { r.paise = Math.round(r.exact); assigned += r.paise; }
+    }
+    unclaimed.exact = unclaimed.raw * delta;
+    unclaimed.paise = Math.round(unclaimed.exact);
+    if (host) people[host.id].paise = targetTotal - assigned - unclaimed.paise;
+
+    return { claimMap, people, unclaimed, mFood, mLiq, delta, bFood, bLiq, computedTotal, printedTotal, targetTotal };
+  }
+  // </math>
+
+  // =====================================================================
+  // State
+  // =====================================================================
+  const state = {
+    draft: null,        // { host_name, host_vpa, participants[], actual_paid, bill{...} } during review
+    room: null,         // { session, participants, items, claims }
+    roomId: null,
+    me: null,           // active participant id
+    split: null,
+    busy: false,
+  };
+  let imageB64 = null;
+
+  // =====================================================================
+  // Small helpers
+  // =====================================================================
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const rupees = (paise) => '₹' + (Math.round(paise) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const toPaise = (v) => { const n = parseFloat(v); return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0; };
+  const fromPaise = (p) => (p ? (p / 100).toFixed(2).replace(/\.00$/, '') : '');
+  const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  let toastTimer;
+  function toast(msg, ms = 2600) {
+    const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
+  }
+
+  async function api(path, opts = {}) {
+    let res;
+    try { res = await fetch(API + path, opts); }
+    catch { throw new Error("You're offline or the server can't be reached. Try again."); }
+    let data = null;
+    try { data = await res.json(); } catch { /* non-JSON */ }
+    if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status}).`);
+    return data;
+  }
+
+  function show(view) {
+    for (const v of ['viewSetup', 'viewReview', 'viewRoom', 'viewError']) $(v).classList.toggle('hidden', v !== view);
+    $('roomBadge').classList.toggle('hidden', view !== 'viewRoom');
+    window.scrollTo(0, 0);
+  }
+
+  function showError(msg) { $('errorText').textContent = msg; show('viewError'); }
+
+  // =====================================================================
+  // VIEW 1 — Setup + image compression
+  // =====================================================================
+  function initSetup() {
+    $('hostName').value = lsGet(LS.hostName) || '';
+    $('hostVpa').value = lsGet(LS.hostVpa) || '';
+    show('viewSetup');
+  }
+
+  $('billFileInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    imageB64 = null;
+    if (!file) return;
+    $('fileNameDisplay').textContent = '⏳ Preparing photo…';
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      // Receipts are tall and narrow: cap width at 1200px and height at 2400px so small text stays legible.
+      const scale = Math.min(1, 1200 / img.width, 2400 / img.height);
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      imageB64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+      URL.revokeObjectURL(url);
+      $('fileNameDisplay').textContent = `✅ ${file.name} (${Math.round(imageB64.length * 0.75 / 1024)} KB)`;
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      $('fileNameDisplay').textContent = '⚠️ Couldn’t open that photo format. Take a new photo with the camera, or use a screenshot.';
+    };
+    img.src = url;
+  });
+
+  function readSetup() {
+    const host_name = $('hostName').value.trim();
+    const host_vpa = $('hostVpa').value.trim();
+    const participants = $('participantsInput').value.split(',').map((s) => s.trim()).filter(Boolean);
+    const actual_paid = $('actualPaidInput').value;
+    if (!host_name) { toast('Enter your name.'); $('hostName').focus(); return null; }
+    if (!/^[a-zA-Z0-9._-]{2,256}@[a-zA-Z0-9.-]{2,64}$/.test(host_vpa)) { toast('Enter a valid UPI ID, like name@okhdfcbank.'); $('hostVpa').focus(); return null; }
+    if (!participants.filter((n) => n.toLowerCase() !== host_name.toLowerCase()).length) { toast('Add at least one friend.'); $('participantsInput').focus(); return null; }
+    lsSet(LS.hostName, host_name); lsSet(LS.hostVpa, host_vpa);
+    return { host_name, host_vpa, participants, actual_paid_paise: toPaise(actual_paid) };
+  }
+
+  $('setupForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const setup = readSetup(); if (!setup) return;
+    if (!imageB64) { toast('Snap or select a bill photo first (or enter it manually).'); return; }
+    $('setupForm').classList.add('hidden'); $('scanLoading').classList.remove('hidden');
+    try {
+      const { bill } = await api('/parse', { method: 'POST', headers: { 'content-type': 'text/plain', 'x-image-mime': 'image/jpeg' }, body: imageB64 });
+      openReview(setup, bill);
+    } catch (err) {
+      toast(err.message, 4500);
+    } finally {
+      $('setupForm').classList.remove('hidden'); $('scanLoading').classList.add('hidden');
+    }
+  });
+
+  $('btnManual').addEventListener('click', () => {
+    const setup = readSetup(); if (!setup) return;
+    openReview(setup, { merchant_name: '', items: [{ item_name: '', quantity: 1, total_price_paise: 0, is_alcohol: false }],
+      cgst_paise: 0, sgst_paise: 0, liquor_vat_paise: 0, service_charge_paise: 0, grand_total_paise: 0 });
+  });
+
+  // =====================================================================
+  // VIEW 2 — Review & edit parsed bill
+  // =====================================================================
+  function openReview(setup, bill) {
+    state.draft = { ...setup, bill: JSON.parse(JSON.stringify(bill)) };
+    $('merchantName').value = bill.merchant_name || '';
+    document.querySelectorAll('[data-charge]').forEach((el) => { el.value = fromPaise(bill[el.dataset.charge]); });
+    $('reviewActualPaid').value = fromPaise(setup.actual_paid_paise);
+    renderReviewItems();
+    show('viewReview');
+  }
+
+  function renderReviewItems() {
+    const wrap = $('reviewItems');
+    wrap.innerHTML = state.draft.bill.items.map((it, idx) => `
+      <div class="flex items-center gap-2" data-row="${idx}">
+        <input data-f="item_name" value="${esc(it.item_name)}" placeholder="Item name" maxlength="80"
+               class="flex-1 min-w-0 px-2 py-1.5 text-sm border rounded-lg border-slate-300">
+        <input data-f="price" type="number" inputmode="decimal" step="0.01" min="0" value="${esc(fromPaise(it.total_price_paise))}" placeholder="0"
+               class="w-20 px-2 py-1.5 text-sm border rounded-lg border-slate-300 text-right">
+        <button type="button" data-f="alc" title="Alcohol?" aria-pressed="${it.is_alcohol}"
+                class="w-9 h-9 rounded-lg border text-base ${it.is_alcohol ? 'bg-amber-100 border-amber-400' : 'bg-white border-slate-300 grayscale opacity-40'}">🍺</button>
+        <button type="button" data-f="del" title="Remove" class="w-7 h-9 text-slate-400 hover:text-rose-600">✕</button>
+      </div>`).join('');
+    updateReviewCheck();
+  }
+
+  $('reviewItems').addEventListener('input', (e) => {
+    const row = e.target.closest('[data-row]'); if (!row) return;
+    const it = state.draft.bill.items[+row.dataset.row];
+    if (e.target.dataset.f === 'item_name') it.item_name = e.target.value;
+    if (e.target.dataset.f === 'price') it.total_price_paise = toPaise(e.target.value);
+    updateReviewCheck();
+  });
+  $('reviewItems').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-f]'); if (!btn) return;
+    const idx = +btn.closest('[data-row]').dataset.row;
+    if (btn.dataset.f === 'alc') state.draft.bill.items[idx].is_alcohol = !state.draft.bill.items[idx].is_alcohol;
+    if (btn.dataset.f === 'del') state.draft.bill.items.splice(idx, 1);
+    renderReviewItems();
+  });
+  $('btnAddItem').addEventListener('click', () => {
+    state.draft.bill.items.push({ item_name: '', quantity: 1, total_price_paise: 0, is_alcohol: false });
+    renderReviewItems();
+    const rows = $('reviewItems').querySelectorAll('[data-f="item_name"]'); rows[rows.length - 1].focus();
+  });
+  document.querySelectorAll('[data-charge]').forEach((el) => el.addEventListener('input', () => {
+    state.draft.bill[el.dataset.charge] = toPaise(el.value); updateReviewCheck();
+  }));
+  $('reviewActualPaid').addEventListener('input', () => { state.draft.actual_paid_paise = toPaise($('reviewActualPaid').value); updateReviewCheck(); });
+  $('btnBackToSetup').addEventListener('click', () => show('viewSetup'));
+
+  // Sanity check: items + taxes + service should be close to the printed total.
+  function updateReviewCheck() {
+    const b = state.draft.bill;
+    const items = b.items.filter((i) => i.total_price_paise > 0);
+    const itemsSum = items.reduce((a, i) => a + i.total_price_paise, 0);
+    const computed = itemsSum + b.cgst_paise + b.sgst_paise + b.liquor_vat_paise + b.service_charge_paise;
+    const printed = b.grand_total_paise;
+    const box = $('reviewCheck');
+    const hasVatNoAlc = b.liquor_vat_paise > 0 && !items.some((i) => i.is_alcohol);
+    let msg, ok;
+    if (!printed) { ok = false; msg = `Items + taxes = <b>${rupees(computed)}</b>. Enter the grand total printed on the bill so we can double-check.`; }
+    else {
+      const diff = printed - computed;
+      ok = Math.abs(diff) <= Math.max(200, printed * 0.01);
+      msg = ok
+        ? `✓ Items + taxes = <b>${rupees(computed)}</b>, printed total <b>${rupees(printed)}</b>${diff ? ` (${rupees(Math.abs(diff))} round-off, shared fairly)` : ''}.`
+        : `⚠️ Items + taxes = <b>${rupees(computed)}</b> but the printed total is <b>${rupees(printed)}</b> (off by ${rupees(Math.abs(diff))}). An item or tax is probably missing or misread.`;
+    }
+    if (hasVatNoAlc) { ok = false; msg += '<br>⚠️ Liquor VAT is set but no item is marked 🍺. Mark the drinks so non-drinkers don’t pay VAT.'; }
+    box.className = `text-xs rounded-xl p-3 border ${ok ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`;
+    box.innerHTML = msg;
+  }
+
+  $('btnCreateRoom').addEventListener('click', async () => {
+    if (state.busy) return;
+    const d = state.draft;
+    d.bill.merchant_name = $('merchantName').value.trim();
+    const items = d.bill.items.filter((i) => i.item_name.trim() && i.total_price_paise > 0);
+    if (!items.length) { toast('Add at least one item with a name and price.'); return; }
+    state.busy = true; $('btnCreateRoom').textContent = 'Creating room…';
+    try {
+      const { room_id } = await api('/rooms', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          host_name: d.host_name, host_vpa: d.host_vpa, participants: d.participants,
+          actual_paid: d.actual_paid_paise ? d.actual_paid_paise / 100 : null,
+          bill: { ...d.bill, items },
+        }),
+      });
+      const hostRooms = JSON.parse(lsGet(LS.hostRooms) || '[]'); hostRooms.push(room_id); lsSet(LS.hostRooms, JSON.stringify(hostRooms.slice(-20)));
+      history.pushState({}, '', `/r/${room_id}`);
+      await openRoom(room_id, { justCreated: true });
+    } catch (err) {
+      toast(err.message, 4500);
+    } finally {
+      state.busy = false; $('btnCreateRoom').textContent = '✅ Create Room & Share';
+    }
+  });
+
+  // =====================================================================
+  // VIEW 3 — Room
+  // =====================================================================
+  const isHostDevice = (roomId) => JSON.parse(lsGet(LS.hostRooms) || '[]').includes(roomId);
+
+  async function openRoom(roomId, { justCreated = false } = {}) {
+    state.roomId = roomId;
+    $('badgeRoomId').textContent = roomId;
+    try { state.room = await api(`/rooms/${roomId}`); }
+    catch (err) { showError(err.message); return; }
+
+    // Restore "who am I" for this room; the host's own phone defaults to the host.
+    const saved = lsGet(LS.me(roomId));
+    const host = state.room.participants.find((p) => p.is_host);
+    state.me = state.room.participants.some((p) => p.id === saved) ? saved : (isHostDevice(roomId) && host ? host.id : null);
+
+    renderRoom();
+    show('viewRoom');
+    switchTab(justCreated ? 'summary' : 'claim');
+    $('hostShareBanner').classList.toggle('hidden', !justCreated);
+  }
+
+  async function refreshRoom(quiet = true) {
+    if (!state.roomId) return;
+    try { state.room = await api(`/rooms/${state.roomId}`); renderRoom(); if (!quiet) toast('Updated'); }
+    catch (err) { if (!quiet) toast(err.message); }
+  }
+
+  function renderRoom() {
+    const { session, participants, items, claims } = state.room;
+    state.split = computeSplit(session, participants, items, claims);
+    renderUserSelector();
+    renderMenu();
+    renderMyTotals();
+    renderSummary();
+  }
+
+  function renderUserSelector() {
+    const sel = $('userSelector');
+    sel.innerHTML = `<option value="">Select your name…</option>` + state.room.participants
+      .map((p) => `<option value="${esc(p.id)}" ${p.id === state.me ? 'selected' : ''}>${esc(p.name)}${p.is_host ? ' (host)' : ''}</option>`).join('');
+    const picked = !!state.me;
+    $('claimArea').classList.toggle('hidden', !picked);
+    $('pickNameHint').classList.toggle('hidden', picked);
+  }
+
+  $('userSelector').addEventListener('change', (e) => {
+    state.me = e.target.value || null;
+    if (state.me) lsSet(LS.me(state.roomId), state.me);
+    renderRoom();
+  });
+
+  function renderMenu() {
+    const nameOf = Object.fromEntries(state.room.participants.map((p) => [p.id, p.name]));
+    $('menuContainer').innerHTML = state.room.items.map((item) => {
+      const claimants = state.split.claimMap[item.id] || [];
+      const mine = claimants.includes(state.me);
+      const n = claimants.length;
+      const who = claimants.map((pid) => esc(nameOf[pid] || '?')).join(', ');
+      const myShare = mine ? ` · you: ${rupees(item.total_price_paise / n)}` : '';
+      return `
+        <button type="button" data-item="${esc(item.id)}" aria-pressed="${mine}"
+          class="w-full text-left p-3 rounded-xl border transition flex items-center justify-between gap-3 ${mine ? 'bg-sky-50 border-sky-400 ring-1 ring-sky-300' : 'bg-white border-slate-200 hover:border-slate-300'}">
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5 font-semibold text-sm text-slate-800">
+              <span>${item.is_alcohol ? '🍺' : '🍲'}</span><span class="truncate">${esc(item.item_name)}</span>
+              ${item.quantity > 1 ? `<span class="text-[11px] text-slate-400 font-medium">×${esc(item.quantity)}</span>` : ''}
+            </div>
+            <div class="text-xs text-slate-500 mt-0.5">${rupees(item.total_price_paise)}${myShare}
+              ${n > 1 ? `<span class="ml-1 text-[10px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">Split ${n} ways</span>` : ''}
+              ${n === 0 ? '<span class="ml-1 text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">Unclaimed</span>' : ''}
+            </div>
+            ${who ? `<div class="text-[11px] text-slate-400 mt-0.5 truncate">${who}</div>` : ''}
+          </div>
+          <div class="w-6 h-6 shrink-0 rounded-full flex items-center justify-center border ${mine ? 'bg-sky-600 border-sky-600 text-white' : 'border-slate-300'}">${mine ? '✓' : ''}</div>
+        </button>`;
+    }).join('');
+  }
+
+  $('menuContainer').addEventListener('click', async (e) => {
+    const card = e.target.closest('[data-item]'); if (!card || !state.me) return;
+    const itemId = card.dataset.item;
+    const claims = state.room.claims;
+    const idx = claims.findIndex((c) => c.line_item_id === itemId && c.participant_id === state.me);
+    const claimed = idx === -1;
+    const before = claims.slice();
+    // Optimistic update, then reconcile with the server's view of the whole room.
+    if (claimed) claims.push({ line_item_id: itemId, participant_id: state.me }); else claims.splice(idx, 1);
+    renderRoom();
+    try {
+      const res = await api(`/rooms/${state.roomId}/claims`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ item_id: itemId, participant_id: state.me, claimed }),
+      });
+      state.room.claims = res.claims;
+    } catch (err) {
+      state.room.claims = before;
+      toast(err.message);
+    }
+    renderRoom();
+  });
+
+  function me() { return state.room.participants.find((p) => p.id === state.me); }
+
+  function upiQuery(amountPaise) {
+    const s = state.room.session;
+    // Keep '@' literal in pa: several UPI apps reject a percent-encoded VPA.
+    return `pa=${encodeURIComponent(s.host_vpa).replace(/%40/g, '@')}&pn=${encodeURIComponent(s.host_name)}&am=${(amountPaise / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent('SplitTab ' + s.id)}`;
+  }
+
+  function renderMyTotals() {
+    const p = me(); if (!p) return;
+    const r = state.split.people[p.id];
+    $('userBaseTotal').textContent = rupees(r.base);
+    $('userTaxTotal').textContent = rupees(r.overhead);
+    const adj = r.paise - Math.round(r.raw);
+    $('adjustRow').classList.toggle('hidden', Math.abs(adj) < 1 || p.is_host);
+    $('adjustLabel').textContent = adj < 0 ? 'Discount / round-off savings:' : 'Round-off / other charges:';
+    $('userAdjust').textContent = (adj < 0 ? '−' : '+') + rupees(Math.abs(adj));
+    $('userGrandTotal').textContent = rupees(p.is_host ? r.exact : r.paise);
+
+    $('payBlock').classList.toggle('hidden', p.is_host);
+    $('hostBlock').classList.toggle('hidden', !p.is_host);
+    if (p.is_host) return;
+
+    const amt = r.paise;
+    $('btnPayAmount').textContent = rupees(amt);
+    const payable = amt > 0;
+    const q = upiQuery(amt);
+    $('btnUpi').href = payable ? `upi://pay?${q}` : '#';
+    $('btnUpi').classList.toggle('opacity-50', !payable);
+    $('btnUpi').classList.toggle('pointer-events-none', !payable);
+    $('iosApps').classList.toggle('hidden', !(isIOS && payable));
+    document.querySelectorAll('#iosApps [data-app]').forEach((a) => {
+      a.href = { gpay: `gpay://upi/pay?${q}`, phonepe: `phonepe://pay?${q}`, paytm: `paytmmp://pay?${q}` }[a.dataset.app];
+    });
+
+    const st = p.payment_status;
+    const btn = $('btnSelfPaid');
+    btn.disabled = st === 'HOST_CONFIRMED';
+    btn.textContent = st === 'UNPAID' ? '✅ I have paid the host' : st === 'SELF_PAID' ? '⏳ Marked paid. Waiting for host to verify (tap to undo)' : '🎉 Host confirmed your payment';
+    btn.className = `w-full py-2 border text-xs font-semibold rounded-lg transition ${
+      st === 'UNPAID' ? 'border-slate-300 text-slate-600 hover:bg-slate-50' : st === 'SELF_PAID' ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-emerald-300 bg-emerald-50 text-emerald-800'}`;
+  }
+
+  $('btnCopyUpi').addEventListener('click', async () => {
+    const p = me(); if (!p) return;
+    const text = `${state.room.session.host_vpa}  ${(state.split.people[p.id].paise / 100).toFixed(2)}`;
+    try { await navigator.clipboard.writeText(text); toast(`Copied: ${text}`); }
+    catch { toast(`UPI ID: ${state.room.session.host_vpa} · Amount: ${rupees(state.split.people[p.id].paise)}`, 6000); }
+  });
+
+  $('btnSelfPaid').addEventListener('click', () => {
+    const p = me(); if (!p || p.payment_status === 'HOST_CONFIRMED') return;
+    setStatus(p.id, p.payment_status === 'UNPAID' ? 'SELF_PAID' : 'UNPAID');
+  });
+
+  async function setStatus(pid, status) {
+    try {
+      const res = await api(`/rooms/${state.roomId}/participants/${pid}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ payment_status: status }),
+      });
+      state.room.participants = res.participants;
+      renderRoom();
+    } catch (err) { toast(err.message); }
+  }
+
+  function renderSummary() {
+    const { session, participants } = state.room;
+    const sp = state.split;
+    $('sumMerchant').textContent = session.merchant_name || '—';
+    $('sumBillTotal').textContent = rupees(session.grand_total_paise || sp.computedTotal);
+    $('sumHostPaid').textContent = rupees(sp.targetTotal);
+    $('sumHostVpa').textContent = session.host_vpa;
+
+    const badge = {
+      UNPAID: '<span class="px-2 py-0.5 rounded font-semibold text-[10px] bg-slate-100 text-slate-600">UNPAID</span>',
+      SELF_PAID: '<span class="px-2 py-0.5 rounded font-semibold text-[10px] bg-amber-100 text-amber-800">SAYS PAID</span>',
+      HOST_CONFIRMED: '<span class="px-2 py-0.5 rounded font-semibold text-[10px] bg-emerald-100 text-emerald-800">CONFIRMED</span>',
+    };
+    $('participantStatusList').innerHTML = participants.map((p) => {
+      const r = sp.people[p.id];
+      if (p.is_host) {
+        return `<div class="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-xs">
+          <span><b class="text-slate-800">${esc(p.name)}</b> <span class="text-slate-400">host · own share ${rupees(r.exact)}</span></span>
+          <span class="px-2 py-0.5 rounded font-semibold text-[10px] bg-sky-100 text-sky-800">PAID BILL</span></div>`;
+      }
+      const action = p.payment_status === 'HOST_CONFIRMED'
+        ? `<button data-status="${esc(p.id)}" data-to="SELF_PAID" class="px-2 py-1 text-slate-500 rounded text-[10px] font-semibold border border-slate-200">Undo</button>`
+        : `<button data-status="${esc(p.id)}" data-to="HOST_CONFIRMED" class="px-2 py-1 bg-slate-800 text-white rounded text-[10px] font-semibold hover:bg-slate-700">Verify</button>`;
+      return `<div class="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-200 text-xs">
+        <span><b class="text-slate-800">${esc(p.name)}</b> <span class="text-slate-500">${rupees(r.paise)}</span></span>
+        <div class="flex items-center gap-2">${badge[p.payment_status] || ''}${action}</div></div>`;
+    }).join('');
+
+    const u = sp.unclaimed;
+    $('unclaimedBox').classList.toggle('hidden', u.items.length === 0);
+    $('unclaimedTotal').textContent = rupees(u.paise);
+    $('unclaimedList').textContent = u.items.map((i) => i.item_name).join(', ');
+
+    const shares = Object.entries(sp.people).reduce((a, [, r]) => a + r.paise, 0);
+    const confirmed = participants.filter((p) => !p.is_host && p.payment_status === 'HOST_CONFIRMED').length;
+    const guests = participants.filter((p) => !p.is_host).length;
+    $('reconLine').textContent = `Shares ${rupees(shares)} + unclaimed ${rupees(u.paise)} = ${rupees(shares + u.paise)} (host paid ${rupees(sp.targetTotal)}) · ${confirmed}/${guests} confirmed`;
+  }
+
+  $('participantStatusList').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-status]'); if (!b) return;
+    setStatus(b.dataset.status, b.dataset.to);
+  });
+
+  function switchTab(tab) {
+    const claim = tab === 'claim';
+    $('contentClaim').classList.toggle('hidden', !claim);
+    $('contentSummary').classList.toggle('hidden', claim);
+    $('tabClaim').className = `flex-1 pb-2 text-sm ${claim ? 'font-bold text-sky-600 border-b-2 border-sky-600' : 'font-semibold text-slate-400 hover:text-slate-600'}`;
+    $('tabSummary').className = `flex-1 pb-2 text-sm ${!claim ? 'font-bold text-sky-600 border-b-2 border-sky-600' : 'font-semibold text-slate-400 hover:text-slate-600'}`;
+  }
+  document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { switchTab(b.dataset.tab); refreshRoom(); }));
+
+  const roomUrl = () => `${location.origin}/r/${state.roomId}`;
+  $('btnShareWa').addEventListener('click', () => {
+    const s = state.room.session;
+    const text = `🧾 ${s.merchant_name || 'Dinner'} bill: tap the dishes you had and pay your exact share by UPI: ${roomUrl()}`;
+    window.location.href = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  });
+  $('btnCopyLink').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(roomUrl()); toast('Room link copied'); } catch { toast(roomUrl(), 6000); }
+  });
+  $('btnRefresh').addEventListener('click', () => refreshRoom(false));
+
+  // When a diner comes back from GPay/PhonePe (or switches back to the tab), pull fresh state.
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshRoom(); });
+
+  // =====================================================================
+  // Router
+  // =====================================================================
+  function route() {
+    const m = location.pathname.match(/^\/r\/([a-z0-9]{8})\/?$/) || (location.hash.match(/room=([a-z0-9]{8})/) || []);
+    if (m && m[1]) openRoom(m[1]); else initSetup();
+  }
+  window.addEventListener('popstate', route);
+  route();
+  </script>
+</body>
+</html>
