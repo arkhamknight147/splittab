@@ -4,6 +4,9 @@ All notable changes to SplitTab are documented here. Dates are in IST.
 
 ## [2.1.1] - 2026-10-18
 
+### Fixed
+- CI and `.nvmrc` now use Node 22: wrangler 4 refuses to run on Node 20, which failed every CI run.
+
 ### Security
 - Security headers on every page via `public/_headers`: Content-Security-Policy, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy.
 - Room creation rate-limited per IP (5/min) and per day (500) to protect the D1 write quota.

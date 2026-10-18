@@ -107,7 +107,7 @@ sequenceDiagram
 
 ### Prerequisites
 
-- Node.js 20+ (`node -v`)
+- Node.js 22+ (`node -v`), required by wrangler 4
 - Optional: Python 3 + `pip install playwright pillow` and `playwright install chromium` for the browser tests
 
 ### Run locally (no API key needed)
