@@ -6,7 +6,21 @@
   <meta name="theme-color" content="#0f172a">
   <meta name="description" content="Fair itemized bill splits for Indian restaurants. Zero app installs, 1-tap UPI.">
   <title>SplitTab - Zero-Install Dining Split</title>
-  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <!-- Link previews (WhatsApp, Slack, iMessage). og:image must be an absolute URL:
+       update it if you move SplitTab to another domain. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="SplitTab">
+  <meta property="og:title" content="SplitTab: split the bill fairly">
+  <meta property="og:description" content="Tap what you ate, pay your exact share by UPI. GST and liquor VAT split correctly. No app needed.">
+  <meta property="og:image" content="https://splittab.splittabsubdomain.workers.dev/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <!-- Pre-built Tailwind (regenerate with `npm run css` after changing classes in this file) -->
+  <link rel="stylesheet" href="/app.css">
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
     input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -24,7 +38,7 @@
         <p class="text-xs text-slate-500 font-medium">Fair itemized splits • Zero app installs</p>
       </a>
       <div id="roomBadge" class="hidden text-right">
-        <div class="text-xs font-semibold px-2.5 py-1 bg-sky-100 text-sky-800 rounded-full">Room <span id="badgeRoomId"></span></div>
+        <div class="text-xs font-semibold px-2.5 py-1 bg-sky-100 text-sky-800 rounded-full whitespace-nowrap">Room <span id="badgeRoomId" class="font-mono"></span></div>
         <button id="btnRefresh" class="mt-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800">↻ Refresh</button>
       </div>
     </div>
@@ -112,6 +126,8 @@
           <label class="space-y-1"><span class="text-slate-500">SGST</span><input data-charge="sgst_paise" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
           <label class="space-y-1"><span class="text-slate-500">Liquor VAT</span><input data-charge="liquor_vat_paise" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
           <label class="space-y-1"><span class="text-slate-500">Service charge</span><input data-charge="service_charge_paise" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
+          <label class="space-y-1"><span class="text-slate-500">Discount on bill</span><input data-charge="discount_paise" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
+          <label class="space-y-1"><span class="text-slate-500">Round-off (±)</span><input data-charge="round_off_paise" type="number" inputmode="decimal" step="0.01" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
           <label class="space-y-1 col-span-2"><span class="text-slate-500">Grand total printed on bill</span><input data-charge="grand_total_paise" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300 font-semibold"></label>
           <label class="space-y-1 col-span-2"><span class="text-slate-500">Amount you actually paid (blank = grand total)</span><input id="reviewActualPaid" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-2 py-1.5 border rounded-lg border-slate-300"></label>
         </div>
@@ -169,7 +185,8 @@
               <a data-app="phonepe" class="py-2 text-center text-xs font-semibold bg-white border border-slate-300 rounded-lg">PhonePe</a>
               <a data-app="paytm" class="py-2 text-center text-xs font-semibold bg-white border border-slate-300 rounded-lg">Paytm</a>
             </div>
-            <button id="btnCopyUpi" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition">📋 Copy UPI ID &amp; amount</button>
+            <p class="text-[11px] text-slate-500 text-center">App didn't open, or it blocked the payment? Copy the UPI ID and pay <b id="manualAmount">₹0.00</b> manually.</p>
+            <button id="btnCopyUpi" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition">📋 Copy UPI ID <span id="copyVpaLabel" class="font-mono"></span></button>
             <button id="btnSelfPaid" class="w-full py-2 border border-slate-300 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg transition">✅ I have paid the host</button>
           </div>
           <div id="hostBlock" class="hidden text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3">
@@ -183,6 +200,11 @@
       <div id="contentSummary" class="hidden space-y-4">
         <div id="hostShareBanner" class="hidden bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl p-3 text-xs">
           Room created 🎉 Share the link with your friends so they can claim their dishes.
+        </div>
+        <div id="hostLinkBox" class="hidden bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600 space-y-2">
+          <p><b class="text-slate-800">🔑 You're the host on this phone.</b> Only you can verify payments and unlock names.
+            To manage the room from another device, open your private host link there. Don't share it.</p>
+          <button id="btnCopyHostLink" class="w-full py-2 bg-white border border-slate-300 rounded-lg font-semibold text-slate-700 hover:bg-slate-100">Copy private host link</button>
         </div>
         <div class="bg-slate-50 rounded-xl p-3 border border-slate-200 text-xs text-slate-600 space-y-1">
           <div class="flex justify-between"><span>Restaurant:</span><span id="sumMerchant" class="font-bold text-slate-800"></span></div>
@@ -227,7 +249,11 @@
   // CONFIG — no secrets live here. The API is same-origin (Cloudflare Worker).
   // =====================================================================
   const API = '/api';
-  const LS = { hostName: 'st.hostName', hostVpa: 'st.hostVpa', hostRooms: 'st.hostRooms', me: (r) => `st.me.${r}` };
+  const LS = {
+    hostName: 'st.hostName', hostVpa: 'st.hostVpa', me: (r) => `st.me.${r}`,
+    hostTok: (r) => `st.host.${r}`,               // secret host token for room r
+    pTok: (r, pid) => `st.ptok.${r}.${pid}`,      // this phone's token for participant pid
+  };
 
   // =====================================================================
   // <math> — Split engine (pure; tested by tests/math.test.mjs)
@@ -310,8 +336,12 @@
     roomId: null,
     me: null,           // active participant id
     split: null,
+    viewer: { is_host: false, participant_id: null, open_mode: false },
     busy: false,
+    pendingClaims: 0,   // claim requests in flight (#12)
+    paidConfirmed: false,
   };
+  let claimChain = Promise.resolve();
   let imageB64 = null;
 
   // =====================================================================
@@ -321,6 +351,7 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const rupees = (paise) => '₹' + (Math.round(paise) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const toPaise = (v) => { const n = parseFloat(v); return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0; };
+  const toSignedPaise = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? Math.round(n * 100) : 0; };
   const fromPaise = (p) => (p ? (p / 100).toFixed(2).replace(/\.00$/, '') : '');
   const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
@@ -332,8 +363,21 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
   }
 
+  // Room requests carry this phone's tokens (if any) so the server knows who is asking.
+  function authHeaders() {
+    const h = {};
+    if (!state.roomId) return h;
+    const host = lsGet(LS.hostTok(state.roomId));
+    if (host) h['x-host-token'] = host;
+    const pid = state.me || lsGet(LS.me(state.roomId));
+    const ptok = pid && lsGet(LS.pTok(state.roomId, pid));
+    if (ptok) h['x-participant-token'] = ptok;
+    return h;
+  }
+
   async function api(path, opts = {}) {
     let res;
+    if (state.roomId && path.startsWith(`/rooms/${state.roomId}`)) opts = { ...opts, headers: { ...(opts.headers || {}), ...authHeaders() } };
     try { res = await fetch(API + path, opts); }
     catch { throw new Error("You're offline or the server can't be reached. Try again."); }
     let data = null;
@@ -416,7 +460,7 @@
   $('btnManual').addEventListener('click', () => {
     const setup = readSetup(); if (!setup) return;
     openReview(setup, { merchant_name: '', items: [{ item_name: '', quantity: 1, total_price_paise: 0, is_alcohol: false }],
-      cgst_paise: 0, sgst_paise: 0, liquor_vat_paise: 0, service_charge_paise: 0, grand_total_paise: 0 });
+      cgst_paise: 0, sgst_paise: 0, liquor_vat_paise: 0, service_charge_paise: 0, grand_total_paise: 0, discount_paise: 0, round_off_paise: 0 });
   });
 
   // =====================================================================
@@ -466,9 +510,12 @@
     const rows = $('reviewItems').querySelectorAll('[data-f="item_name"]'); rows[rows.length - 1].focus();
   });
   document.querySelectorAll('[data-charge]').forEach((el) => el.addEventListener('input', () => {
-    state.draft.bill[el.dataset.charge] = toPaise(el.value); updateReviewCheck();
+    state.draft.bill[el.dataset.charge] = el.dataset.charge === 'round_off_paise' ? toSignedPaise(el.value) : toPaise(el.value);
+    updateReviewCheck();
   }));
-  $('reviewActualPaid').addEventListener('input', () => { state.draft.actual_paid_paise = toPaise($('reviewActualPaid').value); updateReviewCheck(); });
+  $('reviewActualPaid').addEventListener('input', () => {
+    state.draft.actual_paid_paise = toPaise($('reviewActualPaid').value); state.paidConfirmed = false; updateReviewCheck();
+  });
   $('btnBackToSetup').addEventListener('click', () => show('viewSetup'));
 
   // Sanity check: items + taxes + service should be close to the printed total.
@@ -476,20 +523,31 @@
     const b = state.draft.bill;
     const items = b.items.filter((i) => i.total_price_paise > 0);
     const itemsSum = items.reduce((a, i) => a + i.total_price_paise, 0);
-    const computed = itemsSum + b.cgst_paise + b.sgst_paise + b.liquor_vat_paise + b.service_charge_paise;
+    const discount = b.discount_paise || 0, roundOff = b.round_off_paise || 0;
+    const computed = itemsSum + b.cgst_paise + b.sgst_paise + b.liquor_vat_paise + b.service_charge_paise - discount + roundOff;
+    const extras = [discount ? `− ${rupees(discount)} discount` : '', roundOff ? `${roundOff < 0 ? '−' : '+'} ${rupees(Math.abs(roundOff))} round-off` : '']
+      .filter(Boolean).join(' ');
+    const label = `Items + taxes${extras ? ' ' + extras : ''}`;
     const printed = b.grand_total_paise;
     const box = $('reviewCheck');
     const hasVatNoAlc = b.liquor_vat_paise > 0 && !items.some((i) => i.is_alcohol);
     let msg, ok;
-    if (!printed) { ok = false; msg = `Items + taxes = <b>${rupees(computed)}</b>. Enter the grand total printed on the bill so we can double-check.`; }
+    if (!printed) { ok = false; msg = `${label} = <b>${rupees(computed)}</b>. Enter the grand total printed on the bill so we can double-check.`; }
     else {
       const diff = printed - computed;
       ok = Math.abs(diff) <= Math.max(200, printed * 0.01);
       msg = ok
-        ? `✓ Items + taxes = <b>${rupees(computed)}</b>, printed total <b>${rupees(printed)}</b>${diff ? ` (${rupees(Math.abs(diff))} round-off, shared fairly)` : ''}.`
-        : `⚠️ Items + taxes = <b>${rupees(computed)}</b> but the printed total is <b>${rupees(printed)}</b> (off by ${rupees(Math.abs(diff))}). An item or tax is probably missing or misread.`;
+        ? `✓ ${label} = <b>${rupees(computed)}</b>, printed total <b>${rupees(printed)}</b>${diff ? ` (${rupees(Math.abs(diff))} difference, shared fairly)` : ''}.`
+        : `⚠️ ${label} = <b>${rupees(computed)}</b> but the printed total is <b>${rupees(printed)}</b> (off by ${rupees(Math.abs(diff))}). An item or tax is probably missing or misread.`;
     }
     if (hasVatNoAlc) { ok = false; msg += '<br>⚠️ Liquor VAT is set but no item is marked 🍺. Mark the drinks so non-drinkers don’t pay VAT.'; }
+    // #2: a typo in "amount you paid" scales everyone's share, so flag anything implausible.
+    const paid = state.draft.actual_paid_paise || 0;
+    state.paidWarning = null;
+    if (paid && printed && paid > printed) state.paidWarning = `You paid <b>${rupees(paid)}</b>, which is more than the printed total. Friends will be charged extra.`;
+    else if (paid && printed && paid < printed * 0.5) state.paidWarning = `You paid <b>${rupees(paid)}</b>, less than half the printed total. Check for a typo.`;
+    if (state.paidWarning) { ok = false; msg += `<br>⚠️ ${state.paidWarning}`; }
+    else if (paid && printed && paid < printed) msg += `<br>💸 Discount of <b>${rupees(printed - paid)}</b> will be shared across everyone.`;
     box.className = `text-xs rounded-xl p-3 border ${ok ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`;
     box.innerHTML = msg;
   }
@@ -500,9 +558,14 @@
     d.bill.merchant_name = $('merchantName').value.trim();
     const items = d.bill.items.filter((i) => i.item_name.trim() && i.total_price_paise > 0);
     if (!items.length) { toast('Add at least one item with a name and price.'); return; }
+    if (state.paidWarning && !state.paidConfirmed) {
+      state.paidConfirmed = true;
+      toast('The amount you paid looks unusual. Check it, or tap Create again to continue.', 4500);
+      return;
+    }
     state.busy = true; $('btnCreateRoom').textContent = 'Creating room…';
     try {
-      const { room_id } = await api('/rooms', {
+      const { room_id, host_token } = await api('/rooms', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           host_name: d.host_name, host_vpa: d.host_vpa, participants: d.participants,
@@ -510,7 +573,7 @@
           bill: { ...d.bill, items },
         }),
       });
-      const hostRooms = JSON.parse(lsGet(LS.hostRooms) || '[]'); hostRooms.push(room_id); lsSet(LS.hostRooms, JSON.stringify(hostRooms.slice(-20)));
+      if (host_token) lsSet(LS.hostTok(room_id), host_token);
       history.pushState({}, '', `/r/${room_id}`);
       await openRoom(room_id, { justCreated: true });
     } catch (err) {
@@ -523,18 +586,24 @@
   // =====================================================================
   // VIEW 3 — Room
   // =====================================================================
-  const isHostDevice = (roomId) => JSON.parse(lsGet(LS.hostRooms) || '[]').includes(roomId);
+  // Host powers: a valid host token, or a legacy room created before v2.1 (open mode).
+  const canHost = () => state.viewer.is_host || state.viewer.open_mode;
 
   async function openRoom(roomId, { justCreated = false } = {}) {
     state.roomId = roomId;
     $('badgeRoomId').textContent = roomId;
     try { state.room = await api(`/rooms/${roomId}`); }
     catch (err) { showError(err.message); return; }
+    state.viewer = state.room.viewer || state.viewer;
 
-    // Restore "who am I" for this room; the host's own phone defaults to the host.
+    // Restore "who am I": the name this phone holds, else (host) the last name used, else the host's own name.
     const saved = lsGet(LS.me(roomId));
     const host = state.room.participants.find((p) => p.is_host);
-    state.me = state.room.participants.some((p) => p.id === saved) ? saved : (isHostDevice(roomId) && host ? host.id : null);
+    const known = (id) => state.room.participants.some((p) => p.id === id);
+    if (state.viewer.participant_id) state.me = state.viewer.participant_id;
+    else if (canHost() && known(saved)) state.me = saved;
+    else if (state.viewer.is_host && host) state.me = host.id;
+    else state.me = null;
 
     renderRoom();
     show('viewRoom');
@@ -544,7 +613,8 @@
 
   async function refreshRoom(quiet = true) {
     if (!state.roomId) return;
-    try { state.room = await api(`/rooms/${state.roomId}`); renderRoom(); if (!quiet) toast('Updated'); }
+    if (state.pendingClaims > 0) return; // don't overwrite taps that are still being saved (#12)
+    try { state.room = await api(`/rooms/${state.roomId}`); state.viewer = state.room.viewer || state.viewer; renderRoom(); if (!quiet) toast('Updated'); }
     catch (err) { if (!quiet) toast(err.message); }
   }
 
@@ -559,16 +629,39 @@
 
   function renderUserSelector() {
     const sel = $('userSelector');
-    sel.innerHTML = `<option value="">Select your name…</option>` + state.room.participants
-      .map((p) => `<option value="${esc(p.id)}" ${p.id === state.me ? 'selected' : ''}>${esc(p.name)}${p.is_host ? ' (host)' : ''}</option>`).join('');
+    const host = canHost();
+    sel.innerHTML = `<option value="">Select your name…</option>` + state.room.participants.map((p) => {
+      const mine = p.id === state.me;
+      const locked = !host && !mine && (p.is_host || p.taken);
+      const tag = p.is_host ? ' (host)' : p.taken && !mine ? ' · on another phone' : '';
+      return `<option value="${esc(p.id)}" ${mine ? 'selected' : ''} ${locked ? 'disabled' : ''}>${esc(p.name)}${tag}</option>`;
+    }).join('');
     const picked = !!state.me;
     $('claimArea').classList.toggle('hidden', !picked);
     $('pickNameHint').classList.toggle('hidden', picked);
   }
 
-  $('userSelector').addEventListener('change', (e) => {
-    state.me = e.target.value || null;
-    if (state.me) lsSet(LS.me(state.roomId), state.me);
+  // Picking a name locks it to this phone (first come, first served). The host can act as anyone.
+  $('userSelector').addEventListener('change', async (e) => {
+    const pid = e.target.value || null;
+    const previous = state.me;
+    if (!pid) { state.me = canHost() ? null : previous; renderRoom(); return; }
+    if (!canHost()) {
+      if (state.viewer.participant_id && state.viewer.participant_id !== pid) {
+        const mine = state.room.participants.find((p) => p.id === state.viewer.participant_id);
+        toast(`This phone is already ${mine ? mine.name : 'someone else'}. Ask the host to unlock it if that's wrong.`, 4500);
+        renderRoom(); return;
+      }
+      if (!lsGet(LS.pTok(state.roomId, pid))) {
+        try {
+          const res = await api(`/rooms/${state.roomId}/participants/${pid}/join`, { method: 'POST' });
+          if (res.token) lsSet(LS.pTok(state.roomId, pid), res.token);
+        } catch (err) { toast(err.message, 4500); state.me = previous; renderRoom(); return; }
+      }
+    }
+    state.me = pid;
+    lsSet(LS.me(state.roomId), pid);
+    await refreshRoom();
     renderRoom();
   });
 
@@ -605,21 +698,25 @@
     const claims = state.room.claims;
     const idx = claims.findIndex((c) => c.line_item_id === itemId && c.participant_id === state.me);
     const claimed = idx === -1;
-    const before = claims.slice();
-    // Optimistic update, then reconcile with the server's view of the whole room.
-    if (claimed) claims.push({ line_item_id: itemId, participant_id: state.me }); else claims.splice(idx, 1);
+    const pid = state.me;
+    // Optimistic update now; requests are sent one at a time, in tap order, and the server's view
+    // of the room is applied only once the last one returns, so fast taps never flicker back.
+    if (claimed) claims.push({ line_item_id: itemId, participant_id: pid }); else claims.splice(idx, 1);
     renderRoom();
-    try {
-      const res = await api(`/rooms/${state.roomId}/claims`, {
-        method: 'PUT', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ item_id: itemId, participant_id: state.me, claimed }),
-      });
-      state.room.claims = res.claims;
-    } catch (err) {
-      state.room.claims = before;
-      toast(err.message);
-    }
-    renderRoom();
+    state.pendingClaims++;
+    claimChain = claimChain.then(async () => {
+      try {
+        const res = await api(`/rooms/${state.roomId}/claims`, {
+          method: 'PUT', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ item_id: itemId, participant_id: pid, claimed }),
+        });
+        if (--state.pendingClaims === 0) { state.room.claims = res.claims; renderRoom(); }
+      } catch (err) {
+        state.pendingClaims--;
+        toast(err.message);
+        if (state.pendingClaims === 0) await refreshRoom(); // resync with the truth
+      }
+    });
   });
 
   function me() { return state.room.participants.find((p) => p.id === state.me); }
@@ -627,7 +724,7 @@
   function upiQuery(amountPaise) {
     const s = state.room.session;
     // Keep '@' literal in pa: several UPI apps reject a percent-encoded VPA.
-    return `pa=${encodeURIComponent(s.host_vpa).replace(/%40/g, '@')}&pn=${encodeURIComponent(s.host_name)}&am=${(amountPaise / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent('SplitTab ' + s.id)}`;
+    return `pa=${encodeURIComponent(s.host_vpa).replace(/%40/g, '@')}&pn=${encodeURIComponent(s.host_name)}&am=${(amountPaise / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent('SplitTab-' + s.id)}`;
   }
 
   function renderMyTotals() {
@@ -647,6 +744,8 @@
 
     const amt = r.paise;
     $('btnPayAmount').textContent = rupees(amt);
+    $('manualAmount').textContent = rupees(amt);
+    $('copyVpaLabel').textContent = state.room.session.host_vpa;
     const payable = amt > 0;
     const q = upiQuery(amt);
     $('btnUpi').href = payable ? `upi://pay?${q}` : '#';
@@ -665,11 +764,12 @@
       st === 'UNPAID' ? 'border-slate-300 text-slate-600 hover:bg-slate-50' : st === 'SELF_PAID' ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-emerald-300 bg-emerald-50 text-emerald-800'}`;
   }
 
+  // Copies only the VPA: UPI apps' "Pay to UPI ID" field rejects anything else pasted with it.
   $('btnCopyUpi').addEventListener('click', async () => {
     const p = me(); if (!p) return;
-    const text = `${state.room.session.host_vpa}  ${(state.split.people[p.id].paise / 100).toFixed(2)}`;
-    try { await navigator.clipboard.writeText(text); toast(`Copied: ${text}`); }
-    catch { toast(`UPI ID: ${state.room.session.host_vpa} · Amount: ${rupees(state.split.people[p.id].paise)}`, 6000); }
+    const vpa = state.room.session.host_vpa, amt = rupees(state.split.people[p.id].paise);
+    try { await navigator.clipboard.writeText(vpa); toast(`UPI ID copied. In your UPI app: Pay → UPI ID → paste → ${amt}`, 6000); }
+    catch { toast(`UPI ID: ${vpa} · Amount: ${amt}`, 8000); }
   });
 
   $('btnSelfPaid').addEventListener('click', () => {
@@ -707,13 +807,19 @@
           <span><b class="text-slate-800">${esc(p.name)}</b> <span class="text-slate-400">host · own share ${rupees(r.exact)}</span></span>
           <span class="px-2 py-0.5 rounded font-semibold text-[10px] bg-sky-100 text-sky-800">PAID BILL</span></div>`;
       }
-      const action = p.payment_status === 'HOST_CONFIRMED'
+      // Verify / Undo / Unlock are host-only (the server enforces this too).
+      const host = canHost();
+      const action = !host ? '' : p.payment_status === 'HOST_CONFIRMED'
         ? `<button data-status="${esc(p.id)}" data-to="SELF_PAID" class="px-2 py-1 text-slate-500 rounded text-[10px] font-semibold border border-slate-200">Undo</button>`
         : `<button data-status="${esc(p.id)}" data-to="HOST_CONFIRMED" class="px-2 py-1 bg-slate-800 text-white rounded text-[10px] font-semibold hover:bg-slate-700">Verify</button>`;
+      const unlock = host && p.taken && !state.viewer.open_mode
+        ? `<button data-unlock="${esc(p.id)}" title="Let ${esc(p.name)} use a different phone" class="px-1.5 py-1 text-slate-400 hover:text-slate-700 text-[10px]">Unlock</button>` : '';
       return `<div class="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-200 text-xs">
-        <span><b class="text-slate-800">${esc(p.name)}</b> <span class="text-slate-500">${rupees(r.paise)}</span></span>
-        <div class="flex items-center gap-2">${badge[p.payment_status] || ''}${action}</div></div>`;
+        <span><b class="text-slate-800">${esc(p.name)}</b>${p.taken ? ' <span title="Joined on a phone">📱</span>' : ''} <span class="text-slate-500">${rupees(r.paise)}</span></span>
+        <div class="flex items-center gap-1.5">${badge[p.payment_status] || ''}${action}${unlock}</div></div>`;
     }).join('');
+
+    $('hostLinkBox').classList.toggle('hidden', !(state.viewer.is_host && lsGet(LS.hostTok(state.roomId))));
 
     const u = sp.unclaimed;
     $('unclaimedBox').classList.toggle('hidden', u.items.length === 0);
@@ -726,9 +832,21 @@
     $('reconLine').textContent = `Shares ${rupees(shares)} + unclaimed ${rupees(u.paise)} = ${rupees(shares + u.paise)} (host paid ${rupees(sp.targetTotal)}) · ${confirmed}/${guests} confirmed`;
   }
 
-  $('participantStatusList').addEventListener('click', (e) => {
+  $('participantStatusList').addEventListener('click', async (e) => {
+    const u = e.target.closest('[data-unlock]');
+    if (u) {
+      try {
+        const res = await api(`/rooms/${state.roomId}/participants/${u.dataset.unlock}/reset`, { method: 'POST' });
+        state.room.participants = res.participants; renderRoom(); toast('Unlocked. They can pick their name on a new phone.');
+      } catch (err) { toast(err.message); }
+      return;
+    }
     const b = e.target.closest('[data-status]'); if (!b) return;
     setStatus(b.dataset.status, b.dataset.to);
+  });
+  $('btnCopyHostLink').addEventListener('click', async () => {
+    const link = `${roomUrl()}#host=${lsGet(LS.hostTok(state.roomId))}`;
+    try { await navigator.clipboard.writeText(link); toast('Private host link copied. Keep it to yourself.'); } catch { toast(link, 8000); }
   });
 
   function switchTab(tab) {
@@ -759,6 +877,11 @@
   // =====================================================================
   function route() {
     const m = location.pathname.match(/^\/r\/([a-z0-9]{8})\/?$/) || (location.hash.match(/room=([a-z0-9]{8})/) || []);
+    const hostTok = location.hash.match(/host=([A-Za-z0-9_-]{20,64})/);
+    if (m && m[1] && hostTok) {
+      lsSet(LS.hostTok(m[1]), hostTok[1]);
+      history.replaceState({}, '', `/r/${m[1]}`); // keep the secret out of the address bar / shares
+    }
     if (m && m[1]) openRoom(m[1]); else initSetup();
   }
   window.addEventListener('popstate', route);

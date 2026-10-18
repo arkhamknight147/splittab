@@ -9,6 +9,13 @@
  *   GET   /api/rooms/:roomId                      full room state (session, participants, items, claims)
  *   PUT   /api/rooms/:roomId/claims               toggle one claim -> fresh claims for the room
  *   PATCH /api/rooms/:roomId/participants/:pid    set payment_status -> fresh participants for the room
+ *   POST  /api/rooms/:roomId/participants/:pid/join   lock a name to this phone -> participant token
+ *   POST  /api/rooms/:roomId/participants/:pid/reset  (host) unlock a name so another phone can use it
+ *
+ * Auth (v2.1): room creation returns a secret host token (sent back as X-Host-Token).
+ * The first phone to pick a name gets a participant token (X-Participant-Token).
+ * Only SHA-256 hashes of tokens are stored. Rooms created before v2.1 have no
+ * host_token_hash and stay in open mode.
  *
  * Money crosses the API as integer paise. The split maths runs in the browser
  * (see computeSplit in public/index.html) so the diner sees totals instantly.
@@ -20,6 +27,7 @@ const MAX_ITEMS = 80;
 const PAYMENT_STATUSES = ['UNPAID', 'SELF_PAID', 'HOST_CONFIRMED'];
 const VPA_RE = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z0-9.-]{2,64}$/;
 const ROOM_ID_RE = /^[a-z0-9]{8}$/;
+const PARTICIPANT_COLS = 'id, name, is_host, payment_status, (claim_token_hash IS NOT NULL) AS taken';
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -41,8 +49,10 @@ export default {
   // Daily cron: delete rooms older than ROOM_TTL_DAYS (children cascade).
   async scheduled(_event, env) {
     const days = Math.max(1, parseInt(env.ROOM_TTL_DAYS || '30', 10));
-    await env.DB.prepare("DELETE FROM sessions WHERE created_at < datetime('now', ?)")
-      .bind(`-${days} days`).run();
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM sessions WHERE created_at < datetime('now', ?)").bind(`-${days} days`),
+      env.DB.prepare('DELETE FROM parse_log WHERE created_ms < ?').bind(Date.now() - 86_400_000),
+    ]);
   },
 };
 
@@ -56,10 +66,16 @@ async function route(request, env, url) {
   if (parts[1] === 'rooms' && parts.length >= 3) {
     const roomId = parts[2];
     if (!ROOM_ID_RE.test(roomId)) throw new HttpError(404, 'Room not found.');
-    if (parts.length === 3 && method === 'GET') return json(await getRoom(env, roomId));
+    if (parts.length === 3 && method === 'GET') return json(await getRoom(request, env, roomId));
     if (parts.length === 4 && parts[3] === 'claims' && method === 'PUT') return setClaim(request, env, roomId);
     if (parts.length === 5 && parts[3] === 'participants' && method === 'PATCH') {
       return setPaymentStatus(request, env, roomId, parts[4]);
+    }
+    if (parts.length === 6 && parts[3] === 'participants' && parts[5] === 'join' && method === 'POST') {
+      return joinAsParticipant(request, env, roomId, parts[4]);
+    }
+    if (parts.length === 6 && parts[3] === 'participants' && parts[5] === 'reset' && method === 'POST') {
+      return resetParticipant(request, env, roomId, parts[4]);
     }
   }
   throw new HttpError(404, 'Not found.');
@@ -77,6 +93,7 @@ async function parseReceipt(request, env) {
   if (b64.length > MAX_IMAGE_B64_CHARS) throw new HttpError(413, 'Image too large. Please retake the photo.');
   const mime = (request.headers.get('x-image-mime') || 'image/jpeg').toLowerCase();
   if (!/^image\/(jpeg|png|webp)$/.test(mime)) throw new HttpError(415, 'Unsupported image type.');
+  await enforceParseLimit(request, env);
 
   if (env.GEMINI_MOCK === '1') return json({ bill: normaliseBill(MOCK_BILL), model: 'mock' });
   if (!env.GEMINI_API_KEY) throw new HttpError(500, 'Server is missing GEMINI_API_KEY.');
@@ -98,6 +115,24 @@ async function parseReceipt(request, env) {
   }
   console.error('Gemini failed:', lastError);
   throw new HttpError(502, "Couldn't read the bill right now. Retake the photo or enter the bill manually.");
+}
+
+// Every scan spends Gemini quota, so cap scans per IP per minute and across the whole app per day.
+// Stored in D1 so it works on the Workers Free plan without extra products.
+async function enforceParseLimit(request, env) {
+  const ip = request.headers.get('cf-connecting-ip') || 'local';
+  const now = Date.now();
+  const perMinute = positiveInt(env.PARSE_LIMIT_PER_MINUTE, 6);
+  const perDay = positiveInt(env.PARSE_LIMIT_PER_DAY, 300);
+  const row = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM parse_log WHERE ip = ?1 AND created_ms > ?2) AS ip_minute,
+      (SELECT COUNT(*) FROM parse_log WHERE created_ms > ?3) AS all_day`)
+    .bind(ip, now - 60_000, now - 86_400_000).first();
+  if (row.ip_minute >= perMinute) throw new HttpError(429, 'Too many scans from this phone. Wait a minute and try again.');
+  if (row.all_day >= perDay) {
+    throw new HttpError(429, "SplitTab has reached today's scan limit. Enter the bill manually, or try again tomorrow.");
+  }
+  await env.DB.prepare('INSERT INTO parse_log (ip, created_ms) VALUES (?, ?)').bind(ip, now).run();
 }
 
 const GEMINI_PROMPT = `You are an expert OCR parser for Indian restaurant bills.
@@ -203,14 +238,21 @@ async function createRoom(request, env) {
     actualPaid = toPaise(body.actual_paid);
     if (actualPaid <= 0) actualPaid = null;
   }
+  // Safety net behind the client-side warning: a typo like 11000 for 1100 would bill everyone 10x.
+  if (actualPaid && bill.grand_total_paise > 0 && actualPaid > bill.grand_total_paise * 2) {
+    throw new HttpError(400, 'The amount you paid is more than double the bill total. Please check it.');
+  }
+
+  const hostToken = newToken();
+  const hostTokenHash = await sha256(hostToken);
 
   const roomId = newRoomId();
   const stmts = [
     env.DB.prepare(`INSERT INTO sessions (id, merchant_name, host_name, host_vpa, subtotal_paise, cgst_paise, sgst_paise,
-        liquor_vat_paise, service_charge_paise, grand_total_paise, actual_paid_paise)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        liquor_vat_paise, service_charge_paise, grand_total_paise, actual_paid_paise, host_token_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(roomId, bill.merchant_name, hostName, hostVpa, bill.subtotal_paise, bill.cgst_paise, bill.sgst_paise,
-        bill.liquor_vat_paise, bill.service_charge_paise, bill.grand_total_paise, actualPaid),
+        bill.liquor_vat_paise, bill.service_charge_paise, bill.grand_total_paise, actualPaid, hostTokenHash),
   ];
   roster.forEach((name, i) => {
     stmts.push(env.DB.prepare('INSERT INTO participants (id, session_id, name, is_host, sort_order) VALUES (?, ?, ?, ?, ?)')
@@ -223,25 +265,38 @@ async function createRoom(request, env) {
   });
   // D1 batch = one implicit transaction: the room is created completely or not at all.
   await env.DB.batch(stmts);
-  return json({ room_id: roomId }, 201);
+  // The host token is returned exactly once; only its hash is stored.
+  return json({ room_id: roomId, host_token: hostToken }, 201);
 }
 
 /* ------------------------------------------------------------------ */
 /* GET /api/rooms/:id                                                  */
 /* ------------------------------------------------------------------ */
 
-async function getRoom(env, roomId) {
+async function getRoom(request, env, roomId) {
   const [s, p, li, c] = await env.DB.batch([
     env.DB.prepare('SELECT * FROM sessions WHERE id = ?').bind(roomId),
-    env.DB.prepare('SELECT id, name, is_host, payment_status FROM participants WHERE session_id = ? ORDER BY sort_order').bind(roomId),
+    env.DB.prepare(`SELECT ${PARTICIPANT_COLS}, claim_token_hash FROM participants WHERE session_id = ? ORDER BY sort_order`).bind(roomId),
     env.DB.prepare('SELECT id, item_name, quantity, total_price_paise, is_alcohol FROM line_items WHERE session_id = ? ORDER BY sort_order').bind(roomId),
     env.DB.prepare('SELECT line_item_id, participant_id FROM item_claims WHERE session_id = ?').bind(roomId),
   ]);
   const session = s.results[0];
   if (!session) throw new HttpError(404, 'Room not found. It may have expired.');
+  const hostHash = session.host_token_hash;
+  delete session.host_token_hash; // never sent to the browser
+
+  // Tell this browser who it is: host (valid host token) and/or which name it holds.
+  const viewer = { is_host: false, participant_id: null, open_mode: !hostHash };
+  if (hostHash) {
+    viewer.is_host = await tokenMatches(request.headers.get('x-host-token'), hostHash);
+    const pTokHash = await hashHeader(request.headers.get('x-participant-token'));
+    const mine = pTokHash && p.results.find((r) => r.claim_token_hash === pTokHash);
+    if (mine) viewer.participant_id = mine.id;
+  }
   return {
     session,
-    participants: p.results.map((r) => ({ ...r, is_host: !!r.is_host })),
+    viewer,
+    participants: p.results.map(({ claim_token_hash, ...r }) => cleanParticipant(r)),
     items: li.results.map((r) => ({ ...r, is_alcohol: !!r.is_alcohol })),
     claims: c.results,
   };
@@ -258,11 +313,14 @@ async function setClaim(request, env, roomId) {
   const claimed = body.claimed === true;
 
   // Both ids must belong to this room (prevents cross-room writes).
-  const ok = await env.DB.prepare(`SELECT
-      (SELECT COUNT(*) FROM line_items WHERE id = ?1 AND session_id = ?3) AS item_ok,
-      (SELECT COUNT(*) FROM participants WHERE id = ?2 AND session_id = ?3) AS p_ok`)
+  const row = await env.DB.prepare(`SELECT s.host_token_hash, p.claim_token_hash, p.payment_status,
+      (SELECT COUNT(*) FROM line_items WHERE id = ?1 AND session_id = ?3) AS item_ok
+      FROM participants p JOIN sessions s ON s.id = p.session_id
+      WHERE p.id = ?2 AND p.session_id = ?3`)
     .bind(itemId, pid, roomId).first();
-  if (!ok || !ok.item_ok || !ok.p_ok) throw new HttpError(404, 'Item or person not found in this room.');
+  if (!row || !row.item_ok) throw new HttpError(404, 'Item or person not found in this room.');
+  const who = await authorise(request, row);
+  if (!who.host && !who.self) throw new HttpError(403, 'Pick your name on this phone first.');
 
   const write = claimed
     ? env.DB.prepare('INSERT OR IGNORE INTO item_claims (line_item_id, participant_id, session_id) VALUES (?, ?, ?)').bind(itemId, pid, roomId)
@@ -283,17 +341,109 @@ async function setPaymentStatus(request, env, roomId, pid) {
   const body = await readJson(request);
   const status = String(body.payment_status || '');
   if (!PAYMENT_STATUSES.includes(status)) throw new HttpError(400, 'Invalid payment status.');
-  const [upd, rows] = await env.DB.batch([
+  const row = await participantRow(env, roomId, pid);
+  const who = await authorise(request, row);
+  // Confirming (or un-confirming) a payment is the host's call; "I have paid" / undo is the diner's.
+  const hostOnly = status === 'HOST_CONFIRMED' || row.payment_status === 'HOST_CONFIRMED';
+  if (hostOnly && !who.host) throw new HttpError(403, 'Only the host can verify payments.');
+  if (!hostOnly && !who.host && !who.self) throw new HttpError(403, 'Pick your name on this phone first.');
+  const [, rows] = await env.DB.batch([
     env.DB.prepare('UPDATE participants SET payment_status = ? WHERE id = ? AND session_id = ?').bind(status, pid, roomId),
-    env.DB.prepare('SELECT id, name, is_host, payment_status FROM participants WHERE session_id = ? ORDER BY sort_order').bind(roomId),
+    participantsQuery(env, roomId),
   ]);
-  if (!upd.meta || upd.meta.changes === 0) throw new HttpError(404, 'Person not found in this room.');
-  return json({ participants: rows.results.map((r) => ({ ...r, is_host: !!r.is_host })) });
+  return json({ participants: rows.results.map(cleanParticipant) });
+}
+
+/* ------------------------------------------------------------------ */
+/* POST /api/rooms/:id/participants/:pid/join                          */
+/* ------------------------------------------------------------------ */
+
+// Locks a name to the first phone that picks it, so nobody can claim or pay "as" someone else.
+async function joinAsParticipant(request, env, roomId, pid) {
+  const row = await participantRow(env, roomId, pid);
+  const who = await authorise(request, row);
+  if (!row.host_token_hash) return json({ open_mode: true });   // legacy room
+  if (who.host) return json({ host: true });                     // host acts for anyone with the host token
+  if (who.self) return json({ ok: true });                       // this phone already holds the name
+  if (row.is_host) throw new HttpError(409, "That's the host's name. Pick your own name.");
+  if (row.claim_token_hash) {
+    throw new HttpError(409, `${row.name} is already in use on another phone. If that's you, ask the host to unlock it.`);
+  }
+  const token = newToken();
+  const upd = await env.DB.prepare('UPDATE participants SET claim_token_hash = ? WHERE id = ? AND session_id = ? AND claim_token_hash IS NULL')
+    .bind(await sha256(token), pid, roomId).run();
+  if (!upd.meta || upd.meta.changes === 0) throw new HttpError(409, `${row.name} was just picked on another phone.`);
+  return json({ token });
+}
+
+/* ------------------------------------------------------------------ */
+/* POST /api/rooms/:id/participants/:pid/reset   (host only)           */
+/* ------------------------------------------------------------------ */
+
+async function resetParticipant(request, env, roomId, pid) {
+  const row = await participantRow(env, roomId, pid);
+  const who = await authorise(request, row);
+  if (!who.host) throw new HttpError(403, 'Only the host can unlock a name.');
+  const [, rows] = await env.DB.batch([
+    env.DB.prepare('UPDATE participants SET claim_token_hash = NULL WHERE id = ? AND session_id = ?').bind(pid, roomId),
+    participantsQuery(env, roomId),
+  ]);
+  return json({ participants: rows.results.map(cleanParticipant) });
 }
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
+
+function participantsQuery(env, roomId) {
+  return env.DB.prepare(`SELECT ${PARTICIPANT_COLS} FROM participants WHERE session_id = ? ORDER BY sort_order`).bind(roomId);
+}
+
+function cleanParticipant(r) {
+  return { ...r, is_host: !!r.is_host, taken: !!r.taken };
+}
+
+async function participantRow(env, roomId, pid) {
+  const row = await env.DB.prepare(`SELECT p.name, p.is_host, p.payment_status, p.claim_token_hash, s.host_token_hash
+      FROM participants p JOIN sessions s ON s.id = p.session_id WHERE p.id = ? AND p.session_id = ?`)
+    .bind(pid, roomId).first();
+  if (!row) throw new HttpError(404, 'Person not found in this room.');
+  return row;
+}
+
+// Works out what this request may do. Legacy rooms (no host token) allow everything.
+async function authorise(request, row) {
+  if (!row.host_token_hash) return { host: true, self: true };
+  const host = await tokenMatches(request.headers.get('x-host-token'), row.host_token_hash);
+  const self = !!row.claim_token_hash && await tokenMatches(request.headers.get('x-participant-token'), row.claim_token_hash);
+  return { host, self };
+}
+
+async function hashHeader(value) {
+  const v = String(value || '').trim();
+  return v && v.length <= 100 ? sha256(v) : null;
+}
+
+async function tokenMatches(value, expectedHash) {
+  const h = await hashHeader(value);
+  return !!h && !!expectedHash && h === expectedHash;
+}
+
+async function sha256(text) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 24 random bytes, base64url (32 chars).
+function newToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function positiveInt(v, fallback) {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -349,6 +499,9 @@ function normaliseBill(raw) {
     liquor_vat_paise: pick('liquor_vat_paise', 'liquor_vat_amount'),
     service_charge_paise: pick('service_charge_paise', 'service_charge'),
     grand_total_paise: pick('grand_total_paise', 'grand_total'),
+    // Used only by the host's Review check (the split scales to the printed/paid total anyway).
+    discount_paise: pick('discount_paise', 'discount_amount'),
+    round_off_paise: raw.round_off_paise !== undefined ? Math.round(num(raw.round_off_paise)) : toPaise(raw.round_off),
   };
 }
 

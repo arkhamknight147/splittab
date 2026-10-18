@@ -1,6 +1,6 @@
 {
   "name": "splittab",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "Zero-install restaurant bill splitting for India (Cloudflare Workers + D1 + Gemini)",
   "scripts": {
@@ -9,9 +9,14 @@
     "dev": "wrangler dev",
     "dev:mock": "wrangler dev --var GEMINI_MOCK:1",
     "test": "node tests/math.test.mjs",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "css": "tailwindcss -i ./src/styles/tailwind.css -o ./public/app.css --content ./public/index.html --minify"
   },
   "devDependencies": {
-    "wrangler": "^4.151.1"
+    "wrangler": "^4.151.1",
+    "tailwindcss": "3.4.17"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

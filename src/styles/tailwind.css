@@ -1,0 +1,4 @@
+/* Source for public/app.css. Regenerate with: npm run css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

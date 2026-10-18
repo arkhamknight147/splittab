@@ -1,4 +1,4 @@
-# SplitTab v2 — Cloudflare Workers (static assets + API) + D1
+# SplitTab v2.1 — Cloudflare Workers (static assets + API) + D1
 name = "splittab"
 main = "src/worker.js"
 compatibility_date = "2026-09-01"
@@ -12,7 +12,7 @@ not_found_handling = "single-page-application"
 run_worker_first = ["/api/*"]
 
 [[d1_databases]]
-binding = "DB"
+binding = "DB"            # must stay "DB": src/worker.js reads env.DB
 database_name = "splittab"
 database_id = "b55d0d4d-36fb-4a9c-8555-1c6b2c82a79a"   # printed by: npx wrangler d1 create splittab
 migrations_dir = "migrations"
@@ -22,6 +22,13 @@ GEMINI_MODEL = "gemini-3.6-flash"            # primary vision model
 GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"  # used if primary is retired / rate-limited
 ROOM_TTL_DAYS = "30"                         # rooms auto-deleted after this many days
 GEMINI_MOCK = "0"                            # "1" = return the Bangalore Bistro fixture (no API key needed)
+PARSE_LIMIT_PER_MINUTE = "6"                 # max scans per IP per minute (protects Gemini quota)
+PARSE_LIMIT_PER_DAY = "300"                  # max scans per day across the whole app
+
+# Keep Worker logs in the dashboard (Workers & Pages > splittab > Logs),
+# so errors from friends' phones are visible without running `wrangler tail`.
+[observability]
+enabled = true
 
 # Daily clean-up of expired rooms (03:00 UTC)
 [triggers]

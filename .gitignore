@@ -1,5 +1,22 @@
+# Dependencies & build output
 node_modules/
+dist/
+
+# Wrangler local state and secrets
 .wrangler/
 .dev.vars
+
+# Python test caches
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor
 .DS_Store
 Thumbs.db
+desktop.ini
+.vscode/
+.idea/
