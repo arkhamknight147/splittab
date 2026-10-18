@@ -59,6 +59,7 @@ export default {
 async function route(request, env, url) {
   const parts = url.pathname.replace(/\/+$/, '').split('/').filter(Boolean); // ['api', ...]
   const method = request.method;
+  if (method !== 'GET') burstGuard(request, env);
 
   if (parts[1] === 'parse' && parts.length === 2 && method === 'POST') return parseReceipt(request, env);
   if (parts[1] === 'rooms' && parts.length === 2 && method === 'POST') return createRoom(request, env);
@@ -93,7 +94,9 @@ async function parseReceipt(request, env) {
   if (b64.length > MAX_IMAGE_B64_CHARS) throw new HttpError(413, 'Image too large. Please retake the photo.');
   const mime = (request.headers.get('x-image-mime') || 'image/jpeg').toLowerCase();
   if (!/^image\/(jpeg|png|webp)$/.test(mime)) throw new HttpError(415, 'Unsupported image type.');
-  await enforceParseLimit(request, env);
+  await enforceLimit(request, env, 'parse', positiveInt(env.PARSE_LIMIT_PER_MINUTE, 6), positiveInt(env.PARSE_LIMIT_PER_DAY, 300),
+    'Too many scans from this phone. Wait a minute and try again.',
+    "SplitTab has reached today's scan limit. Enter the bill manually, or try again tomorrow.");
 
   if (env.GEMINI_MOCK === '1') return json({ bill: normaliseBill(MOCK_BILL), model: 'mock' });
   if (!env.GEMINI_API_KEY) throw new HttpError(500, 'Server is missing GEMINI_API_KEY.');
@@ -117,22 +120,36 @@ async function parseReceipt(request, env) {
   throw new HttpError(502, "Couldn't read the bill right now. Retake the photo or enter the bill manually.");
 }
 
-// Every scan spends Gemini quota, so cap scans per IP per minute and across the whole app per day.
-// Stored in D1 so it works on the Workers Free plan without extra products.
-async function enforceParseLimit(request, env) {
+// Durable per-IP + per-day limits stored in D1 (works on the Workers Free plan).
+// 'parse' protects the Gemini quota; 'room' protects the D1 daily write quota.
+// Rows live in parse_log (column `ip` holds '<bucket>|<ip>', e.g. 'parse|1.2.3.4').
+async function enforceLimit(request, env, bucket, perMinute, perDay, minuteMsg, dayMsg) {
   const ip = request.headers.get('cf-connecting-ip') || 'local';
+  const key = `${bucket}|${ip}`;
   const now = Date.now();
-  const perMinute = positiveInt(env.PARSE_LIMIT_PER_MINUTE, 6);
-  const perDay = positiveInt(env.PARSE_LIMIT_PER_DAY, 300);
   const row = await env.DB.prepare(`SELECT
       (SELECT COUNT(*) FROM parse_log WHERE ip = ?1 AND created_ms > ?2) AS ip_minute,
-      (SELECT COUNT(*) FROM parse_log WHERE created_ms > ?3) AS all_day`)
-    .bind(ip, now - 60_000, now - 86_400_000).first();
-  if (row.ip_minute >= perMinute) throw new HttpError(429, 'Too many scans from this phone. Wait a minute and try again.');
-  if (row.all_day >= perDay) {
-    throw new HttpError(429, "SplitTab has reached today's scan limit. Enter the bill manually, or try again tomorrow.");
+      (SELECT COUNT(*) FROM parse_log WHERE ip LIKE ?4 AND created_ms > ?3) AS all_day`)
+    .bind(key, now - 60_000, now - 86_400_000, `${bucket}|%`).first();
+  if (row.ip_minute >= perMinute) throw new HttpError(429, minuteMsg);
+  if (row.all_day >= perDay) throw new HttpError(429, dayMsg);
+  await env.DB.prepare('INSERT INTO parse_log (ip, created_ms) VALUES (?, ?)').bind(key, now).run();
+}
+
+// Best-effort flood guard for all API writes (claims, status, join...). Kept in Worker
+// memory, so it costs nothing, but each Cloudflare isolate counts separately.
+const bursts = new Map();
+function burstGuard(request, env) {
+  const ip = request.headers.get('cf-connecting-ip') || 'local';
+  const limit = positiveInt(env.WRITE_BURST_PER_MINUTE, 120);
+  const minute = Math.floor(Date.now() / 60_000);
+  const entry = bursts.get(ip);
+  if (!entry || entry.minute !== minute) {
+    if (bursts.size > 5000) bursts.clear();
+    bursts.set(ip, { minute, count: 1 });
+    return;
   }
-  await env.DB.prepare('INSERT INTO parse_log (ip, created_ms) VALUES (?, ?)').bind(ip, now).run();
+  if (++entry.count > limit) throw new HttpError(429, 'Too many requests. Slow down and try again in a minute.');
 }
 
 const GEMINI_PROMPT = `You are an expert OCR parser for Indian restaurant bills.
@@ -212,6 +229,9 @@ async function callGemini(apiKey, model, mime, b64) {
 /* ------------------------------------------------------------------ */
 
 async function createRoom(request, env) {
+  await enforceLimit(request, env, 'room', positiveInt(env.ROOM_LIMIT_PER_MINUTE, 5), positiveInt(env.ROOM_LIMIT_PER_DAY, 500),
+    'Too many rooms created from this network. Wait a minute and try again.',
+    "SplitTab has reached today's room limit. Please try again tomorrow.");
   const body = await readJson(request);
 
   const hostName = cleanName(body.host_name);
@@ -448,7 +468,12 @@ function positiveInt(v, fallback) {
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'no-referrer',
+    },
   });
 }
 

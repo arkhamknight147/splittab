@@ -1,6 +1,6 @@
 {
   "name": "splittab",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "description": "Zero-install restaurant bill splitting for India (Cloudflare Workers + D1 + Gemini)",
   "scripts": {

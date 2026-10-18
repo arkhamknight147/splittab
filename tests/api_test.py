@@ -52,3 +52,12 @@ for _ in range(60):
 ok(codes[-1] == 429 and set(codes[:-1]) == {200}, f'#4 per-IP rate limit kicks in after {len(codes) - 1} scans')
 st, r = call('POST', '/api/parse', raw=b'aGVsbG8=', headers={'cf-connecting-ip': ip + '9'})
 ok(st == 200, 'a different IP is unaffected')
+# room-creation limit (protects the D1 daily write quota)
+ip2 = '10.%d.%d.%d' % tuple(random.randint(1, 254) for _ in range(3))
+rc = []
+for _ in range(60):
+    st, r = call('POST', '/api/rooms', {'host_name': 'X', 'host_vpa': 'xx@ybl', 'participants': ['Y'], 'bill': bill}, {'cf-connecting-ip': ip2})
+    rc.append(st)
+    if st == 429: break
+ok(rc[-1] == 429 and set(rc[:-1]) == {201}, f'room-creation rate limit kicks in after {len(rc) - 1} rooms')
+

@@ -363,6 +363,9 @@ Replaces the v1.0 low-code stack (FlutterFlow/Bubble + Make.com + Supabase).
 | ROOM_TTL_DAYS           | Room retention                           | 30                                           |
 | GEMINI_MOCK             | "1" returns the Bangalore Bistro fixture | 0                                            |
 | PARSE_LIMIT_PER_MINUTE  | Max scans per IP per minute              | 6                                            |
+| ROOM_LIMIT_PER_MINUTE   | Max rooms created per IP per minute (v2.1.1) | 5 |
+| ROOM_LIMIT_PER_DAY      | Max rooms per day, whole app (v2.1.1)    | 500 |
+| WRITE_BURST_PER_MINUTE  | Best-effort cap on API writes per IP per minute (v2.1.1) | 120 |
 | PARSE_LIMIT_PER_DAY     | Max scans per day, whole app             | 300                                          |
 
 ### 6.3 Free-Tier Capacity Budget
@@ -395,5 +398,9 @@ Replaces the v1.0 low-code stack (FlutterFlow/Bubble + Make.com + Supabase).
 • **Gemini free tier:** Google may use free-tier prompts to improve its products and reviewers may read them. Use a paid key before any public launch.
 
 • **Abuse:** /api/parse is rate-limited per IP (cf-connecting-ip, set by Cloudflare) and per day, stored in D1. Implemented in v2.1.
+
+• **v2.1.1 hardening:** room creation is rate-limited per IP and per day (each room is ~11 D1 writes, so this protects the free daily write quota); every API write passes an in-memory per-IP flood guard (best-effort, per isolate); rate-limit rows are keyed `<bucket>|<ip>`.
+
+• **Security headers:** public/_headers sets a Content-Security-Policy (`default-src 'self'`, no third-party scripts, `connect-src 'self'`, `frame-ancestors 'none'`), X-Frame-Options DENY, nosniff, `Referrer-Policy: no-referrer` and a restrictive Permissions-Policy. `script-src` still allows the inline script (single-file design), so output escaping remains the primary XSS defence.
 
 • **Performance:** the photo is not JSON-parsed on the Worker (10 ms CPU budget); one D1 batch per write; refresh on page focus instead of polling.

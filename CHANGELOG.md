@@ -2,6 +2,15 @@
 
 All notable changes to SplitTab are documented here. Dates are in IST.
 
+## [2.1.1] - 2026-10-18
+
+### Security
+- Security headers on every page via `public/_headers`: Content-Security-Policy, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy.
+- Room creation rate-limited per IP (5/min) and per day (500) to protect the D1 write quota.
+- Per-IP flood guard (120 writes/min, in memory) on every API write.
+- API responses send `nosniff` and `no-referrer`.
+- Added `SECURITY.md`.
+
 ## [2.1.0] - 2026-10-18
 
 ### Added

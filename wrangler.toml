@@ -24,6 +24,9 @@ ROOM_TTL_DAYS = "30"                         # rooms auto-deleted after this man
 GEMINI_MOCK = "0"                            # "1" = return the Bangalore Bistro fixture (no API key needed)
 PARSE_LIMIT_PER_MINUTE = "6"                 # max scans per IP per minute (protects Gemini quota)
 PARSE_LIMIT_PER_DAY = "300"                  # max scans per day across the whole app
+ROOM_LIMIT_PER_MINUTE = "5"                  # max rooms created per IP per minute
+ROOM_LIMIT_PER_DAY = "500"                   # max rooms per day (each room ~11 D1 writes)
+WRITE_BURST_PER_MINUTE = "120"               # best-effort cap on API writes per IP per minute
 
 # Keep Worker logs in the dashboard (Workers & Pages > splittab > Logs),
 # so errors from friends' phones are visible without running `wrangler tail`.

@@ -150,6 +150,8 @@ Set in `wrangler.toml` under `[vars]`, except the API key, which is a secret.
 | `GEMINI_FALLBACK_MODEL` | `gemini-3.1-flash-lite` | Used if the primary is retired, busy or over quota |
 | `PARSE_LIMIT_PER_MINUTE` | `6` | Scans per IP per minute |
 | `PARSE_LIMIT_PER_DAY` | `300` | Scans per day across the app (protects the Gemini quota) |
+| `ROOM_LIMIT_PER_MINUTE` / `ROOM_LIMIT_PER_DAY` | `5` / `500` | Rooms created per IP per minute / per day (protects the D1 write quota) |
+| `WRITE_BURST_PER_MINUTE` | `120` | Best-effort cap on API writes per IP per minute |
 | `ROOM_TTL_DAYS` | `30` | Rooms are deleted after this many days |
 | `GEMINI_MOCK` | `0` | `1` returns the sample bill (used by `npm run dev:mock`) |
 
@@ -196,7 +198,11 @@ API reference: [TDD §6.1](docs/TDD.md#61-api-contract).
 - Room links are unguessable 8-character codes. Host and per-phone tokens decide who can verify, unlock or claim; only their SHA-256 hashes are stored.
 - All receipt and user text is HTML-escaped before display; every write is checked against the room it belongs to.
 - Only first names and the host's UPI ID are stored. Receipt photos are never stored. Rooms are deleted after 30 days.
+- Security headers on every page: a Content-Security-Policy that blocks third-party scripts and outbound requests, plus no framing (clickjacking), `nosniff` and `no-referrer`.
+- Abuse limits: scans and room creation are rate-limited per IP and per day (stored in D1), and all API writes have a per-IP flood guard.
 - On Gemini's free tier, Google may use submitted images to improve its products. Use a paid key for a public launch.
+
+Found a vulnerability? See [SECURITY.md](SECURITY.md).
 
 ## Product decisions
 
