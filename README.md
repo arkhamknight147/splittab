@@ -23,6 +23,10 @@
 </p>
 
 <p align="center">
+  ✅ <b>Validated end-to-end with a real UPI payment</b>: bill scanned, dishes claimed and the exact share paid from a friend's phone into the host's UPI account.
+</p>
+
+<p align="center">
   <img src="docs/images/screens.png" alt="Host reviews the scanned bill, a diner claims dishes, the host tracks payments" width="900">
 </p>
 
@@ -50,7 +54,7 @@ Splitting a restaurant bill in India is harder than it looks:
 - **Taxes don't split evenly.** Food carries 5% GST (CGST + SGST); alcohol carries state liquor VAT instead. Service charge and Zomato Gold / card discounts cut across both.
 - **Split apps need everyone to install and sign up.** At the table, nobody does, so the host pays and chases friends on WhatsApp for days.
 
-SplitTab turns a photo of the bill into a shared room where each person taps what they ate and pays their exact share with one UPI tap.
+SplitTab turns a photo of the bill into a shared room where each person taps what they ate and pays their exact share with one UPI tap. The full flow has been tested on real phones with a real UPI transfer, not just in simulated browsers.
 
 ## Features
 
