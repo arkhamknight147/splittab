@@ -14,7 +14,7 @@ run_worker_first = ["/api/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "splittab"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"   # printed by: npx wrangler d1 create splittab
+database_id = "b55d0d4d-36fb-4a9c-8555-1c6b2c82a79a"   # printed by: npx wrangler d1 create splittab
 migrations_dir = "migrations"
 
 [vars]
