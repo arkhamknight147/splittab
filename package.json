@@ -13,7 +13,7 @@
     "css": "tailwindcss -i ./src/styles/tailwind.css -o ./public/app.css --content ./public/index.html --minify"
   },
   "devDependencies": {
-    "wrangler": "^4.151.1",
+    "wrangler": "^4.151.3",
     "tailwindcss": "3.4.17"
   },
   "engines": {
